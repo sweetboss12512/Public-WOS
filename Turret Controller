@@ -230,12 +230,10 @@ end
 
 -- Connections
 Keyboard:Connect("TextInputted", function(text, playerName)
-	--[[
 	if not table.find(Commanders, playerName) and not inCommand then
 		SetResults("Access denied", 1.5)
 		return
 	end
-	--]]
 	
 	text = text:sub(1, -2)
 	
