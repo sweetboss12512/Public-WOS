@@ -230,10 +230,12 @@ end
 
 -- Connections
 Keyboard:Connect("TextInputted", function(text, playerName)
+	--[[
 	if not table.find(Commanders, playerName) and not inCommand then
 		SetResults("Access denied", 1.5)
 		return
 	end
+	--]]
 	
 	text = text:sub(1, -2)
 	
@@ -290,6 +292,19 @@ function Commands.target(arguments)
 	
 	turret.Target = newTarget
 	SetResults("Set target of "..turret.Name.." to "..newTarget, 2)
+	UpdateTurrets()
+end
+
+function Commands.alltarget(arguments)
+	local newTarget = arguments[2]
+	
+	for _, turreType in pairs(Turrets) do
+		for _, turret in pairs(turreType) do
+			turret.Target = newTarget
+		end
+	end
+	
+	SetResults("All targeting "..newTarget, 2)
 	UpdateTurrets()
 end
 
@@ -372,7 +387,7 @@ function Commands.reportselected()
 	end
 end
 
-function Commands.activate()
+function Commands.enable()
 	if not selectedTurret then
 		return
 	end
@@ -383,7 +398,7 @@ function Commands.activate()
 	UpdateTurrets()
 end
 
-function Commands.deactivate()
+function Commands.disable()
 	if not selectedTurret then
 		return
 	end
@@ -392,6 +407,28 @@ function Commands.deactivate()
 
 	turret.Enabled = false
 	SetResults("Deactivated turret "..turret.Name, 2)
+	UpdateTurrets()
+end
+
+function Commands.enableall()
+	for _, turretType in pairs(Turrets) do
+		for _, turret in pairs(turretType) do
+			turret.Enabled = true
+		end
+	end
+	
+	SetResults("Enabled all turrets", 2)
+	UpdateTurrets()
+end
+
+function Commands.disableall()
+	for _, turretType in pairs(Turrets) do
+		for _, turret in pairs(turretType) do
+			turret.Enabled = false
+		end
+	end
+
+	SetResults("Disabled all turrets", 2)
 	UpdateTurrets()
 end
 
@@ -415,6 +452,7 @@ function Commands.listcommands()
 		task.wait(.7)
 	end
 	
+	SetResults("", 0)
 	inCommand = false
 end
 
