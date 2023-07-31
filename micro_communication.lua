@@ -1,5 +1,3 @@
-local Communication = {_Threads = {}, _Ports = {}}
-
 function Communication.SendMessage(topicName: string, port, dataToSend)
 	local disk = GetPartFromPort(port, "Disk")
 
@@ -8,7 +6,7 @@ function Communication.SendMessage(topicName: string, port, dataToSend)
 	end
 
 	local returnTable = {}
-
+	
 	disk:Write(topicName, dataToSend)
 	disk:Write(topicName.."Returns", returnTable)
 
@@ -30,11 +28,11 @@ function Communication.SendMessage(topicName: string, port, dataToSend)
 		local data
 		local timeWaited = 0
 		timeoutSeconds = timeoutSeconds or 10
-
-		repeat
+		
+		while not data and timeWaited <= timeoutSeconds do
 			timeWaited += task.wait()
 			data = returnTable[index]
-		until data or timeWaited >= timeoutSeconds
+		end
 
 		if not data then
 			print("[Communication.MessageResult]: Yield timeout, failed to get data results")
@@ -52,30 +50,32 @@ function Communication.SubscribeToTopic(topicName: string, port, callback)
 	if typeof(port) == "number" then
 		port = GetPort(port)
 	end
-	
+
 	if not port then
 		error(("[Communication.SubscribeToTopic]: Port not found, id: %s"):format(port or "none provided"))
 	end
-	
+
 	if not Communication._Ports[port.GUID] then
 		Communication._Ports[port.GUID] = {}
 
 		port:Connect("Triggered", function(senderPort)
+
 			local disk = GetPartFromPort(senderPort, "Disk")
 
 			if not disk then
 				return
 			end
-			
+
+			---print(#Communication._Ports[port.GUID].." SUBSCRIPTIONS")
 			for _, subscription in ipairs(Communication._Ports[port.GUID]) do
 				local topicInfo = disk:Read(subscription.TopicName)
 
 				if not topicInfo then
 					continue
 				end
-				
+
 				subscription._DiskPort = senderPort
-				local success, dataIndex, returned = pcall(callback, topicInfo)
+				local success, dataIndex, returned = pcall(subscription._Callback, topicInfo)
 
 				if not success then
 					print("[Communication.TopicSubscription]: Error in callback:\n"..dataIndex) 
@@ -98,18 +98,19 @@ function Communication.SubscribeToTopic(topicName: string, port, callback)
 	local self = {
 		_DiskPort = nil,
 		_Binded = true,
+		_Callback = callback,
 		TopicName = topicName,
 	}
 
 	function self:Unbind()
 		local index = table.find(Communication._Ports[port.GUID], self)
-		
-		if not index then
+
+		if not index or not self._Binded then
 			error("[Communication.TopicSubscription]: Topic is already unsubscribed from")
 		end
-		
+
 		table.remove(Communication._Ports[port.GUID], index)
-		table.clear(self)
+		self._Binded = false
 		print(("[Communication.TopicSubscription]: Unsubscribed from topic: '%s'"):format(topicName))
 	end
 
@@ -121,7 +122,7 @@ function Communication.SubscribeToTopic(topicName: string, port, callback)
 
 		return Communication.SendMessage(topicName, self._DiskPort, data)
 	end
-	
+
 	table.insert(Communication._Ports[port.GUID], self)
 	return self
 end
