@@ -68,7 +68,6 @@ function Communication.SubscribeToTopic(topicName: string, port, callback)
 				return
 			end
 
-			---print(#Communication._Ports[port.GUID].." SUBSCRIPTIONS")
 			for _, subscription in ipairs(Communication._Ports[port.GUID]) do
 				local topicInfo = disk:Read(subscription.TopicName)
 
@@ -150,9 +149,10 @@ function Communication:SubscribeToAntennaScramble(port)
 
 	local antenna = GetPartFromPort(port, "Antenna") or error("[Communication:ScrambleAntennaID]: No antenna found on the provided port")
 	local subscription = Communication.SubscribeToTopic("_ScrambleAntenna", port, function(newID)
-		print("ID: "..newID)
 		antenna:Configure({AntennaID = newID})
 	end)
 
 	return subscription
 end
+
+return Communication
