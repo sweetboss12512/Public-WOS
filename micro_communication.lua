@@ -1,3 +1,5 @@
+local Communication = {_Threads = {}, _Ports = {}}
+
 function Communication.SendMessage(topicName: string, port, dataToSend)
 	local disk = GetPartFromPort(port, "Disk")
 
@@ -125,4 +127,32 @@ function Communication.SubscribeToTopic(topicName: string, port, callback)
 
 	table.insert(Communication._Ports[port.GUID], self)
 	return self
+end
+
+function Communication:ScrambleAntennaID(port)
+	if typeof(port) == "number" then
+		port = GetPort(port)
+	end
+
+	local antenna = GetPartFromPort(port, "Antenna") or error("[Communication:ScrambleAntennaID]: No antenna found on the provided port")
+	local newID = math.random(1, 999)
+
+	local messageResult = Communication.SendMessage("_ScrambleAntenna", port, newID)
+	task.wait(1)
+	antenna:Configure({AntennaID = newID})
+	return messageResult
+end
+
+function Communication:SubscribeToAntennaScramble(port)
+	if typeof(port) == "number" then
+		port = GetPort(port)
+	end
+
+	local antenna = GetPartFromPort(port, "Antenna") or error("[Communication:ScrambleAntennaID]: No antenna found on the provided port")
+	local subscription = Communication.SubscribeToTopic("_ScrambleAntenna", port, function(newID)
+		print("ID: "..newID)
+		antenna:Configure({AntennaID = newID})
+	end)
+
+	return subscription
 end
