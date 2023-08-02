@@ -18,7 +18,7 @@ function Communication.SendMessage(topicName: string, port, dataToSend)
 		coroutine.close(Communication._Threads[topicName])
 	end
 
-	Communication._Threads[topicName] = task.delay(1, function()
+	Communication._Threads[topicName] = task.delay(1, function() -- Idk about this...
 		disk:Write(topicName, nil)
 	end)
 
