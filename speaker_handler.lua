@@ -562,11 +562,8 @@ for mainName, command in pairs(Commands) do
 
 	if command.Keywords then
 
-		for _, tble in command.Keywords do
-
-			for i, word in ipairs(tble) do
-				tble[i] = word:lower()
-			end
+		for i, word in ipairs(command.Keywords) do
+			command.Keywords[i] = word:lower()
 		end
 	else
 		print(`Command '{mainName} has no keywords table`)
