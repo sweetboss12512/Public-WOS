@@ -1,23 +1,24 @@
-local Communication = {_Threads = {}, _Ports = {}}
+local Communication = {
+	_Threads = {},
+	_Ports = {} :: { [string]: { Event: any, Subscribed: {TopicSubscription} } }
+}
 
-function Communication.SendMessage(topicName: string, port, dataToSend)
+function Communication.SendMessage(topicName: string, port, dataToSend: any, ...: any)
 	local disk = GetPartFromPort(port, "Disk")
-	
+	local data = { dataToSend, ... }
+
 	if not disk then
+		print(("[Communication.SendMessage]: A disk on port '%s' is required to send a message."):format(port or "[NONE PROVIDED]"))
 		error(("[Communication.SendMessage]: A disk on port '%s' is required to send a message."):format(port or "[NONE PROVIDED]"))
-	end
-	
-	if not dataToSend then
-		dataToSend = true
 	end
 
 	local returnTable = {}
 
-	disk:Write(topicName, dataToSend) -- it HAS to send some data!!!
+	disk:Write(topicName, data)
 	disk:Write(`{topicName}_Returns`, returnTable)
 
 	TriggerPort(port)
-
+	
 	if Communication._Threads[topicName] then
 		coroutine.close(Communication._Threads[topicName])
 	end
@@ -58,6 +59,7 @@ function Communication.SubscribeToTopic(topicName: string, port, callback)
 	end
 
 	if not port then
+		print("[Communication.SubscribeToTopic]: Port not found or not provided")
 		error("[Communication.SubscribeToTopic]: Port not found or not provided")
 	end
 
@@ -66,23 +68,27 @@ function Communication.SubscribeToTopic(topicName: string, port, callback)
 		Communication._Ports[port.GUID] = info
 
 		info.Event = port:Connect("Triggered", function(senderPort)
+			print("I got triggered")
 			local disk = GetPartFromPort(senderPort, "Disk")
 
 			if not disk then
+				print("No disk?")
 				return
 			end
-
-			for _, subscription in ipairs(info.Subscribed) do
+			
+			print(`{#info.Subscribed} subscriptions`)
+			for _, subscription: TopicSubscription in ipairs(info.Subscribed) do
 				local topicInfo = disk:Read(subscription.TopicName)
 
 				if not topicInfo then
+					print(`NO topic info for {subscription.TopicName}`)
 					continue
 				end
 
 				local returnsTable = `{topicName}_Returns`
 
 				subscription._DiskPort = senderPort
-				local success, dataIndex, returned = pcall(subscription._Callback, topicInfo)
+				local success, dataIndex, returned = pcall(subscription._Callback, table.unpack(topicInfo))
 
 				if not success then
 					print("[Communication.TopicSubscription]: Error in callback:\n"..dataIndex) 
@@ -153,28 +159,23 @@ function Communication.ScrambleAntennaID(port)
 
 	local messageResult = Communication.SendMessage("_ScrambleAntenna", port, newID)
 	task.wait(0.5)
-	
+
 	if #messageResult.Results > 0 then -- 
 		antenna:Configure({AntennaID = newID})
 	else
 		print("[Communication.ScrambleAntennaID]: No returns, antenna ID not changed")
 	end
-	
+
 	return messageResult
 end
 
 function Communication.SubscribeToAntennaScramble(port)
-	if typeof(port) == "number" then
-		port = GetPort(port)
-	end
-
 	local antenna = GetPartFromPort(port, "Antenna") or error("[Communication.ScrambleAntennaID]: No antenna found on the provided port")
-	local subscription = Communication.SubscribeToTopic("_ScrambleAntenna", port, function(newID)
+	
+	return Communication.SubscribeToTopic("_ScrambleAntenna", port, function(newID)
 		antenna:Configure({AntennaID = newID})
 		return true
 	end)
-
-	return subscription
 end
 
 export type MessageResult = typeof(Communication.SendMessage())
