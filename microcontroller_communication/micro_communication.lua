@@ -36,13 +36,15 @@ function Communication.SendMessage(topicName: string, port, dataToSend: any, ...
 		local timeWaited = 0
 		timeoutSeconds = timeoutSeconds or 10
 
-		while not data and timeWaited <= timeoutSeconds do
+		while data == nil and timeWaited <= timeoutSeconds do
 			timeWaited += task.wait()
 			data = returnTable[index]
 		end
 
 		if not data then
 			print("[Communication.MessageResult]: Yield timeout, failed to get data results")
+			print("Index:")
+			print(index)
 			--error("[Communication.MessageResult]: Yield timeout, failed to get data results")
 		end
 
@@ -68,7 +70,6 @@ function Communication.SubscribeToTopic(topicName: string, port, callback)
 		Communication._Ports[port.GUID] = info
 
 		info.Event = port:Connect("Triggered", function(senderPort)
-			print("I got triggered")
 			local disk = GetPartFromPort(senderPort, "Disk")
 
 			if not disk then
@@ -76,12 +77,10 @@ function Communication.SubscribeToTopic(topicName: string, port, callback)
 				return
 			end
 			
-			print(`{#info.Subscribed} subscriptions`)
 			for _, subscription: TopicSubscription in ipairs(info.Subscribed) do
 				local topicInfo = disk:Read(subscription.TopicName)
 
 				if not topicInfo then
-					print(`NO topic info for {subscription.TopicName}`)
 					continue
 				end
 
