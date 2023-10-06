@@ -2604,7 +2604,7 @@ FileHandler.Keyboard = Keyboard
 background.Image = OSConfig.Wallpaper
 
 CreateTaskbarButton("Settings", {
-	Image = "http://www.roblox.com/asset/?id=13501991029",
+	Image = OSConfig.Wallpaper,
 	WindowConfig = {
 		Name = "SweetOS",
 		Type = "Scroll",
