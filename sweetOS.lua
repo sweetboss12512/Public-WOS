@@ -2606,7 +2606,7 @@ background.Image = OSConfig.Wallpaper
 CreateTaskbarButton("Settings", {
 	Image = "http://www.roblox.com/asset/?id=13501991029",
 	WindowConfig = {
-		Name = "Settings",
+		Name = "SweetOS",
 		Type = "Scroll",
 		BackgroundImage = "http://www.roblox.com/asset/?id=3899340539",
 		BackgroundBrightenColor = OSConfig.Accent,
