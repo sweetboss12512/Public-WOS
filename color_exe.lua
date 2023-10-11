@@ -1,4 +1,4 @@
-local WOS_MODULES = {}
+ local WOS_MODULES = {}
 
 local oldRequire = require -- Unstable require support.
 local moduleCache = {}
