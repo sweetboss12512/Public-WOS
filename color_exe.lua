@@ -1,3 +1,139 @@
+local WOS_MODULES = {}
+
+local oldRequire = require -- Unstable require support.
+local moduleCache = {}
+	
+local function require(target: any): any
+	if moduleCache[target] then
+		return moduleCache[target]
+	elseif WOS_MODULES[target] then
+		local required = WOS_MODULES[target]()
+		moduleCache[target] = required
+		return required
+	else
+		local success, required = pcall(oldRequire, target)
+		assert(success, `Invalid require '{target}'`)
+		return required
+	end
+end
+
+WOS_MODULES.InputButton = function()
+	local ActiveInputs = {}
+	
+	local function GetKeyboardInput(Keyboard, timeoutSeconds)
+		timeoutSeconds = timeoutSeconds or error("[GetKeyboardInput]: No time provided")
+		local timeWaited = 0
+	
+		local text, playerName
+	
+		local connection = Keyboard:Connect("TextInputted", function(inputText, inputPlayerName)
+			print("EVENT FIRED")
+			text = string.gsub(inputText, "\n+$", "")
+			playerName = inputPlayerName
+		end)
+	
+		while timeWaited < timeoutSeconds and not (text and playerName) do
+			timeWaited += task.wait()
+		end
+	
+		if not text then
+			print("Ran out of time!")
+		end
+	
+		connection:Unbind()
+		return text, playerName
+	end
+	
+	return function(config: { Time: number?, Button: TextButton, Keyboard: any, InputText: string?, DefaultText: string?, Cooldown: number?}, successInput: (string, string) -> (), failInput: () -> () | string)
+		local button = config.Button
+		local defaultText = config.DefaultText or button.Text
+	
+		config.Keyboard = config.Keyboard or error("[InputButton]: No keyboard")
+		
+		local onCooldown = false
+		
+		button.MouseButton1Click:Connect(function()
+			if ActiveInputs[config.Keyboard.GUID] or onCooldown then
+				return
+			end
+			
+			ActiveInputs[config.Keyboard.GUID] = true
+			onCooldown = true
+			
+			button.Text = config.InputText or "Input Keyboard"
+	
+			local text, playerName = GetKeyboardInput(config.Keyboard, config.Time or 6) -- yields
+			
+			if defaultText then
+				button.Text = defaultText
+			end
+	
+			if text then
+				local success, errormsg = pcall(successInput, text, playerName)
+	
+				if not success then
+					print(`[InputButton]: error in success callback:\n{errormsg}`)
+				end
+			else
+				if typeof(failInput) == "function" then
+					local success, errormsg = pcall(failInput)
+	
+					if not success then
+						print(`[InputButton]: error in failure callback:\n{errormsg}`)
+					end
+				elseif typeof(failInput) == "string" then
+					button.Text = failInput or defaultText
+				end
+			end
+			
+			ActiveInputs[config.Keyboard.GUID] = false
+			
+			if config.Cooldown then
+				task.wait(config.Cooldown)
+			end
+			
+			onCooldown = false
+		end)
+	end
+end
+
+WOS_MODULES.StringUtility = function()
+	local module = {}
+	
+	function module.SplitTitleCaps(str)
+		str = str:gsub("(%u)", " %1")
+		return str:gsub("^%s", "")
+	end
+	
+	function module.StringToColor3RGB(str): Color3 -- 255, 200, 255
+		local split = string.split(str, ",")
+	
+		local r = tonumber(split[1])
+		local g = tonumber(split[2])
+		local b = tonumber(split[3])
+	
+		return Color3.fromRGB(r, g, b)
+	end
+	
+	function module.StringToVector3(str): Vector3
+		local split = string.split(str, ",")
+		
+		local x = tonumber(split[1])
+		local y = tonumber(split[2])
+		local z = tonumber(split[3])
+		
+		if not (x and y and z) then
+			return
+		end
+		
+		return Vector3.new(x, y, z)
+	end
+	
+	return module
+end
+
+--
+
 -- Modules
 --local OSLibrary = {
 --	Screen = Screen,
@@ -12,8 +148,8 @@
 --	}
 --}
 
-local InputButton = require(game.ServerStorage.Modules.GuiObjects.InputButton)
-local StringUtil = require(game.ServerStorage.Modules.Misc.StringUtility)
+local InputButton = require("InputButton")
+local StringUtil = require("StringUtility")
 
 -- Objects
 local Screen = OSLibrary.Screen
