@@ -108,234 +108,39 @@ WOS_MODULES.MusicPlayerIds = function()
 	return module
 end
 
-WOS_MODULES.Radar = function()
-	local Screen = GetPartFromPort(1, "Screen") or GetPartFromPort(1, "TouchScreen")
-	local LifeSensor = GetPartFromPort(1, "LifeSensor") or GetPartFromPort(2, "LifeSensor")
+WOS_MODULES.StringUtility = function()
+	local module = {}
 	
-	-- Templates
-	local radarTemplate = { AnchorPoint = Vector2.new(0.5, 0.5), BackgroundTransparency = 1, Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.1, 0.1) }
-	local radarTemplate_Dot = { AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = Color3.fromHex("#FFFFFF"), BorderSizePixel = 0, Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.3, 0.3) }
-	local radarTemplate_NameLabel = { Text = "sweetboss151", TextColor3 = Color3.fromHex("#FFFFFF"), AnchorPoint = Vector2.new(0.5, 0), BackgroundTransparency = 1, Position = UDim2.fromScale(0.5, -0.5), Size = UDim2.fromScale(1, 0.5) }
-	local radarTemplate_PositionLabel = { RichText = true, Text = "100", TextColor3 = Color3.fromHex("#FFFFFF"), AnchorPoint = Vector2.new(0.5, 0), AutomaticSize = Enum.AutomaticSize.X, BackgroundColor3 = Color3.fromHex("#FFFFFF"), BackgroundTransparency = 0.9, BorderSizePixel = 0, Position = UDim2.fromScale(0.5, -0.9), Size = UDim2.fromScale(1, 0.5), ZIndex = 2 }
-	local radarTemplate_Direction = { AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = Color3.fromHex("#FFFFFF"), BackgroundTransparency = 1, BorderSizePixel = 0, Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(1, 1), ZIndex = 0 }
-	local radarTemplate_Direction_Label = { Image = "http://www.roblox.com/asset/?id=6798365555", Active = true, AnchorPoint = Vector2.new(0.5, 0.5), BackgroundTransparency = 1, Position = UDim2.fromScale(0.5, 0.15), Size = UDim2.fromScale(0.5, 0.3), ZIndex = 0 }
-	
-	-- Tables
-	local RadarElements = {}
-	local PlayerPositions = {} -- For calculating velocity
-	
-	local NAME_COLORS = { -- Pasted from devforum.
-		Color3.new(253/255, 41/255, 67/255), -- BrickColor.new("Bright red").Color,
-		Color3.new(1/255, 162/255, 255/255), -- BrickColor.new("Bright blue").Color,
-		Color3.new(2/255, 184/255, 87/255), -- BrickColor.new("Earth green").Color,
-		BrickColor.new("Bright violet").Color,
-		BrickColor.new("Bright orange").Color,
-		BrickColor.new("Bright yellow").Color,
-		BrickColor.new("Light reddish violet").Color,
-		BrickColor.new("Brick yellow").Color,
-	}
-	
-	local RadarModes = {
-		"Static",
-		"Rotate"
-	}
-	
-	-- Constants
-	local X_MAX = 2010
-	local Y_MAX = 2010
-	local VEHICLE_SEAT_PORT = 2
-	
-	-- Variables
-	local radarMode = RadarModes[1]
-	-- Functions
-	local function GetNameValue(pName)
-		local value = 0
-	
-		for index = 1, #pName do
-	
-			local cValue = string.byte(string.sub(pName, index, index))
-			local reverseIndex = #pName - index + 1
-	
-			if #pName % 2 == 1 then
-				reverseIndex = reverseIndex - 1
-			end
-	
-			if reverseIndex % 4 >= 2 then
-				cValue = -cValue
-			end
-			value = value + cValue
-		end
-	
-		return value
+	function module.SplitTitleCaps(str)
+		str = str:gsub("(%u)", " %1")
+		return str:gsub("^%s", "")
 	end
 	
-	local function ComputeNameColor(pName)
-		return NAME_COLORS[((GetNameValue(pName) + 0) % #NAME_COLORS) + 1]
+	function module.StringToColor3RGB(str): Color3 -- 255, 200, 255
+		local split = string.split(str, ",")
+	
+		local r = tonumber(split[1])
+		local g = tonumber(split[2])
+		local b = tonumber(split[3])
+	
+		return Color3.fromRGB(r, g, b)
 	end
 	
-	local function GetAngleBetween(pos1: Vector2, pos2: Vector2)
-		local Origin: Vector2 = pos1
-		local LookAt: Vector2 = pos2
-	
-		local Angle = math.atan2(
-			Origin.Y - LookAt.Y,
-			Origin.X - LookAt.X
-		)
-	
-		return math.deg(Angle)
-	end
-	
-	-- Functions
-	local function CreatePlayerRadar(playerName, radarList)
-		radarTemplate_NameLabel.Text = playerName
-		radarTemplate_Dot.BackgroundColor3 = ComputeNameColor(playerName)
-	
-		local container = Screen:CreateElement("Frame", radarTemplate)
-		local radarDot = Screen:CreateElement("Frame", radarTemplate_Dot)
-		local nameLabel = Screen:CreateElement("TextLabel", radarTemplate_NameLabel)
-		local positionLabel = Screen:CreateElement("TextLabel", radarTemplate_PositionLabel)
-	
-		local directionFrame = Screen:CreateElement("Frame", radarTemplate_Direction)
-		local directionFrameLabel = Screen:CreateElement("ImageLabel", radarTemplate_Direction_Label)
+	function module.StringToVector3(str): Vector3
+		local split = string.split(str, ",")
 		
-		radarList:AddChild(container)
-	
-		container:AddChild(radarDot)
-		container:AddChild(nameLabel)
-		container:AddChild(directionFrame)
-		container:AddChild(positionLabel)
-	
-		directionFrame:AddChild(directionFrameLabel)
-	
-		local info = {
-			Container = container,
-			DirectionFrame = directionFrame,
-			PositionLabel = positionLabel
-		}
-	
-		RadarElements[playerName] = info
-	
-		return info
-	end
-	
-	local function CalculateCompassRotation()
-		local orientationVector
-	
-		if GetPartFromPort(VEHICLE_SEAT_PORT, "VehicleSeat") then
-			orientationVector = GetPartFromPort(VEHICLE_SEAT_PORT, "VehicleSeat").CFrame.LookVector * -1
-		else
-			orientationVector = Screen.CFrame.UpVector
-		end
-	
-		local dot = orientationVector:Dot(Vector3.new(0, 0, 1))
-		return math.deg(math.acos(dot)) * if orientationVector.X > 0 then 1 else -1
-	end
-	
-	local function Radar(window)
-		if not LifeSensor then
-			return "A lifesensor is required on port #1 For the Radar module."
+		local x = tonumber(split[1])
+		local y = tonumber(split[2])
+		local z = tonumber(split[3])
+		
+		if not (x and y and z) then
+			return
 		end
 		
-		local maxLabelX = Screen:CreateElement("TextLabel", { Text = "X - 2048", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, AnchorPoint = Vector2.new(0, 1), BackgroundTransparency = 1, Position = UDim2.fromScale(0, 1), Size = UDim2.fromScale(1, 0.1), Font = Enum.Font.Code })
-		local maxLabelY = Screen:CreateElement("TextLabel", { Text = "Y - 2048", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, AnchorPoint = Vector2.new(0, 1), BackgroundTransparency = 1, Position = UDim2.fromScale(-0.2, 0.5), Rotation = -90, Size = UDim2.fromScale(0.5, 0.1), Font = Enum.Font.Code })
-		local radarList = Screen:CreateElement("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = Color3.fromHex("#2D2D2D"), BorderColor3 = Color3.fromHex("#282828"), BorderSizePixel = 5, Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.8, 0.8) })
-		local radarModeButton = Screen:CreateElement("TextButton", { Text = "RELATIVE", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, AnchorPoint = Vector2.new(1, 1), BackgroundColor3 = Color3.fromHex("#3C3C3C"), BorderColor3 = Color3.fromHex("#000000"), BorderMode = Enum.BorderMode.Inset, BorderSizePixel = 3, Position = UDim2.fromScale(1, 1), Size = UDim2.fromScale(0.2, 0.1) })
-		local gridCenter = Screen:CreateElement("ImageLabel", { Image = "http://www.roblox.com/asset/?id=12072054746", ScaleType = Enum.ScaleType.Crop, AnchorPoint = Vector2.new(0.5, 0.5), BackgroundTransparency = 1, Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.03, 0.03), ZIndex = 0 })
-	
-		local compassContainer = Screen:CreateElement("Frame", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1) })
-		local compassContainer_North = Screen:CreateElement("TextLabel", { RichText = true, Text = "<u>N</u>", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, BackgroundTransparency = 1, Size = UDim2.fromScale(1, 0.05) })
-		local compassContainer_South = Screen:CreateElement("TextLabel", { RichText = true, Text = "<u>S</u>", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, AnchorPoint = Vector2.new(0, 1), BackgroundTransparency = 1, Position = UDim2.fromScale(0, 1), Size = UDim2.fromScale(1, 0.05) })
-		local compassContainer_East = Screen:CreateElement("TextLabel", { RichText = true, Text = "<u>E</u>", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, AnchorPoint = Vector2.new(1, 0.5), BackgroundTransparency = 1, Position = UDim2.fromScale(1, 0.5), Size = UDim2.fromScale(0.1, 0.05) })
-		local compassContainer_West = Screen:CreateElement("TextLabel", { RichText = true, Text = "<u>W</u>", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Position = UDim2.fromScale(0, 0.5), Size = UDim2.fromScale(0.1, 0.05)})
-		
-		radarList:AddChild(gridCenter)
-		radarList:AddChild(compassContainer)
-		compassContainer:AddChild(compassContainer_North)
-		compassContainer:AddChild(compassContainer_South)
-		compassContainer:AddChild(compassContainer_East)
-		compassContainer:AddChild(compassContainer_West)
-		
-		window:AddChild(radarList)
-		window:AddChild(maxLabelX)
-		window:AddChild(maxLabelY)
-		window:AddChild(radarModeButton)
-		
-		task.wait(1)
-		maxLabelX.Text = X_MAX
-		maxLabelY.Text = Y_MAX
-	
-		radarModeButton.MouseButton1Click:Connect(function()
-			local newIndex = table.find(RadarModes, radarMode) + 1
-	
-			if newIndex > #RadarModes then
-				newIndex = 1
-			end
-	
-			radarMode = RadarModes[newIndex]
-			radarModeButton.Text = radarMode:upper()
-		end)
-		
-		while not window.Destroyed do
-			local waitTime = task.wait()
-			local players = LifeSensor:GetReading()
-			LifeSensor = GetPartFromPort(1, "LifeSensor") or GetPartFromPort(2, "LifeSensor") -- Update their CFrames
-			Screen = GetPartFromPort(1, "Screen") or GetPartFromPort(1, "TouchScreen")
-	
-			if radarMode == "Rotate" then
-				local rotation = CalculateCompassRotation()
-	
-				compassContainer.Rotation = rotation
-				compassContainer_North.Rotation = -rotation
-				compassContainer_South.Rotation = -rotation
-				compassContainer_East.Rotation = -rotation
-				compassContainer_West.Rotation = -rotation
-			else
-				compassContainer.Rotation = 0
-				compassContainer_North.Rotation = 0
-				compassContainer_South.Rotation = 0
-				compassContainer_East.Rotation = 0
-				compassContainer_West.Rotation = 0
-			end
-	
-			for playerName, position in pairs(players) do
-				--if playerName ~= "sweetboss151" then
-				--	continue
-				--end
-				position = (position - LifeSensor.CFrame.Position)
-	
-				local radarInfo = RadarElements[playerName] or CreatePlayerRadar(playerName, radarList)
-				local container = radarInfo.Container
-				local directionFrame = radarInfo.DirectionFrame
-	
-				local oldPosition = container.AbsolutePosition
-	
-				local xScale = (position.X / X_MAX)
-				local zScale = (position.Z / Y_MAX)
-	
-				container.Position = UDim2.fromScale(math.clamp(xScale + 0.5, 0, 1), math.clamp(zScale + 0.5, 0, 1))
-				radarInfo.PositionLabel.Text = if position.Y > 10 then math.floor(position.Y) else 0
-	
-				if (oldPosition - container.AbsolutePosition).Magnitude < (waitTime / 2) then
-					directionFrame.Size = UDim2.fromScale(0, 0)
-					continue
-				end
-	
-				directionFrame.Size = radarTemplate_Direction.Size
-				directionFrame.Rotation = GetAngleBetween(oldPosition, container.AbsolutePosition) - 90 + compassContainer.Rotation
-			end
-	
-			for name, info in pairs(RadarElements) do
-				if not players[name] then
-					RadarElements[name] = nil
-					info.Container:Destroy()
-				end
-			end
-		end
-		
-		print("LOOP ENDED")
+		return Vector3.new(x, y, z)
 	end
 	
-	return Radar
+	return module
 end
 
 WOS_MODULES.ListLayoutV2 = function()
@@ -1750,39 +1555,114 @@ WOS_MODULES.GridLayout = function()
 	return GridLayout
 end
 
-WOS_MODULES.StringUtility = function()
-	local module = {}
+WOS_MODULES.ModemRequests = function()
+	local ModemRequests = {DefaultModem = nil}
 	
-	function module.SplitTitleCaps(str)
-		str = str:gsub("(%u)", " %1")
-		return str:gsub("^%s", "")
+	function ModemRequests.PostRequest(url: string, data, timeoutSeconds, extraHeaders, modem)
+		modem = modem or ModemRequests.DefaultModem or error("[ModemRequests.RequestAsync]: No modem provided")
+		
+		local recievedData
+		local timeWaited = 0
+		timeoutSeconds = timeoutSeconds or 20
+	
+		local function callback(success, response)
+			if not success then
+				return
+			end
+	
+			-- Attempt to decode the response
+			local procced, result = pcall(function()
+				recievedData = JSONDecode(response)
+			end)
+	
+			if not procced then
+				print("FAILURE TO DECODE, GOT " + tostring(response))
+				recievedData = response or false
+			end
+		end
+	
+		local headers = {["Content-Type"] = "application/json"}
+	
+		if extraHeaders then
+			for index, value in pairs(extraHeaders) do
+				headers[index] = value
+			end
+		end
+	
+		modem:RealPostRequest(url, JSONEncode(data), true, callback, headers)
+	
+		repeat
+			timeWaited += task.wait()
+		until recievedData ~= nil or timeWaited > timeoutSeconds
+	
+		if recievedData  == nil then
+			print("The URL did not respond.")
+			print(url)
+		end
+	
+		return recievedData
 	end
 	
-	function module.StringToColor3RGB(str): Color3 -- 255, 200, 255
-		local split = string.split(str, ",")
+	export type RequestInfo = {
+		Url: string,
+		Data: {}?,
+		Headers: { [string]: string }?
+	}
 	
-		local r = tonumber(split[1])
-		local g = tonumber(split[2])
-		local b = tonumber(split[3])
+	export type RequestResponse = {
+		status_code: number,
+		text: string,
+		headers: { [string]: string },
+		ok: boolean
+	}
 	
-		return Color3.fromRGB(r, g, b)
-	end
-	
-	function module.StringToVector3(str): Vector3
-		local split = string.split(str, ",")
+	function ModemRequests.GetRequest(info: RequestInfo, timeoutSeconds: number?, modem): RequestResponse
+		modem = modem or info.Modem or ModemRequests.DefaultModem or error("[ModemRequests.GetRequest]: No modem provided")
 		
-		local x = tonumber(split[1])
-		local y = tonumber(split[2])
-		local z = tonumber(split[3])
-		
-		if not (x and y and z) then
-			return
+		local responseData = nil
+	
+		local timeWaited = 0
+		local timeoutSeconds = info.TimeoutSeconds or 20
+	
+		local function callback(success, response)
+			if not success then
+				print("Modem failure, GOT: "..tostring(response))
+			end
+			
+			responseData = response
+		end
+	
+		local headers = {
+			["Content-Type"] = "application/json",
+		}
+	
+		if info.Headers then
+			for index, value in pairs(info.Headers) do
+				headers[index] = value
+			end
 		end
 		
-		return Vector3.new(x, y, z)
+		local content = {
+			["url"] = info.Url,
+			["json_content"] = info.Data,
+			["headers"] = headers
+		}
+		
+		modem:RealPostRequest("https://sweetboss151.pythonanywhere.com/api/http-request", JSONEncode(content), true, callback, { ["Content-Type"] = "application/json", })
+	
+		repeat
+			timeWaited += task.wait()
+		until responseData ~= nil or timeWaited > timeoutSeconds
+	
+		if responseData == nil then
+			print("[GetRequest]: web api did not respond")
+			error("[GetRequest]: web api did not respond")
+		end
+	
+		return responseData
 	end
 	
-	return module
+	return ModemRequests
 end
 
 WOS_MODULES.InputButton = function()
@@ -1812,17 +1692,21 @@ WOS_MODULES.InputButton = function()
 		return text, playerName
 	end
 	
-	return function(config: { Time: number, Button: TextButton, Keyboard: any, InputText: string, DefaultText: string}, callback: (string, string) -> ())
+	return function(config: { Time: number?, Button: TextButton, Keyboard: any, InputText: string?, DefaultText: string?, Cooldown: number?}, successInput: (string, string) -> (), failInput: () -> () | string)
 		local button = config.Button
-		local defaultText = config.DefaultText
+		local defaultText = config.DefaultText or button.Text
 	
 		config.Keyboard = config.Keyboard or error("[InputButton]: No keyboard")
+		
+		local onCooldown = false
+		
 		button.MouseButton1Click:Connect(function()
-			if ActiveInputs[config.Keyboard.GUID] then
+			if ActiveInputs[config.Keyboard.GUID] or onCooldown then
 				return
 			end
 			
 			ActiveInputs[config.Keyboard.GUID] = true
+			onCooldown = true
 			
 			button.Text = config.InputText or "Input Keyboard"
 	
@@ -1833,14 +1717,30 @@ WOS_MODULES.InputButton = function()
 			end
 	
 			if text then
-				local success, errormsg = pcall(callback, text, playerName)
+				local success, errormsg = pcall(successInput, text, playerName)
 	
 				if not success then
-					print(`[InputButton]: error in callback:\n{errormsg}`)
+					print(`[InputButton]: error in success callback:\n{errormsg}`)
+				end
+			else
+				if typeof(failInput) == "function" then
+					local success, errormsg = pcall(failInput)
+	
+					if not success then
+						print(`[InputButton]: error in failure callback:\n{errormsg}`)
+					end
+				elseif typeof(failInput) == "string" then
+					button.Text = failInput or defaultText
 				end
 			end
 			
 			ActiveInputs[config.Keyboard.GUID] = false
+			
+			if config.Cooldown then
+				task.wait(config.Cooldown)
+			end
+			
+			onCooldown = false
 		end)
 	end
 end
@@ -2001,14 +1901,20 @@ WOS_MODULES.WindowHandler = function()
 			end
 	
 			for _, window in pairs(Windows) do
-				if self == window then
+				if self == window or window.Max then
 					continue
 				end
 				
 				local moved = false
 	
 				while self._Elements.windowTemplate.Position == window._Elements.windowTemplate.Position do
-					mainFrame.Position += UDim2.fromScale(0.05, 0.05)
+					--mainFrame.Position += UDim2.fromScale(0.05, 0.05)
+					mainFrame.Position += UDim2.new(
+						config.WindowSize.X.Scale / 10,
+						config.WindowSize.X.Offset / 10,
+						config.WindowSize.Y.Scale / 10,
+						config.WindowSize.Y.Offset / 10
+					)
 					moved = true
 				end
 				
@@ -2021,10 +1927,10 @@ WOS_MODULES.WindowHandler = function()
 		-- Window methods
 		function self:Maximize()
 			for _, v in pairs(Windows) do
-				v._Elements.windowTemplate.ZIndex = 0
+				v._Elements.windowTemplate.ZIndex = 1
 			end
 	
-			mainFrame.ZIndex = 2
+			mainFrame.ZIndex = CountKeys(Windows)
 			mainFrame.Size = UDim2.fromScale(1, 1)
 			mainFrame.Position = UDim2.fromScale(0.5, 0.5)
 	
@@ -2108,6 +2014,7 @@ end
 local WindowHandler = require("WindowHandler")
 local SpeakerHandler = require("SpeakerHandler")
 local FileHandler = require("FileHandler")
+local ModemRequests = require("ModemRequests")
 
 local ListLayout = require("ListLayoutV2")
 local GridLayout = require("GridLayout")
@@ -2124,6 +2031,7 @@ local Screen: ScreenPlus.Screen = ScreenPlus(GetPartFromPort(1, "TouchScreen"))
 local Keyboard: PilotLua.Keyboard = GetPartFromPort(1, "Keyboard")
 local Speaker: PilotLua.Speaker = GetPartFromPort(2, "Speaker")
 local Disk: PilotLua.Disk = GetPartFromPort(2, "Disk")
+local Modem: PilotLua.Modem = GetPartFromPort(2, "Modem")
 local ThreadMicros: { [number]: PilotLua.Microcontroller } = GetPartsFromPort(3, "Microcontroller")
 
 SpeakerHandler.DefaultSpeaker = Speaker
@@ -2203,13 +2111,26 @@ local Components = {
 		if Parent then Parent:AddChild(fileInfoContainer) end
 		return { fileInfoContainer = fileInfoContainer, fileType = fileType, fileName = fileName, fileIcon = fileIcon, fileSize = fileSize }
 	end,
+	
+	WebBrowser_RecentDomainContainer = function(Parent)
+		local recentDomainContainer = Screen:CreateElement("Frame", { BackgroundColor3 = Color3.fromHex("#FFFFFF"), BackgroundTransparency = 0.5, BorderSizePixel = 0, Position = UDim2.fromScale(0, 0.2), Size = UDim2.fromScale(0.9, 0.15) })
+		local domainName = Screen:CreateElement("TextButton", { TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, AutoButtonColor = false, BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Selectable = false, Size = UDim2.fromScale(0.7, 1), Font = Enum.Font.SourceSans })
+		local deleteDomain = Screen:CreateElement("TextButton", { Text = "X", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, AutoButtonColor = false, AnchorPoint = Vector2.new(1, 0), BackgroundColor3 = Color3.fromHex("#C80000"), BorderSizePixel = 0, Position = UDim2.fromScale(1, 0), Selectable = false, Size = UDim2.fromScale(0.3, 1), Font = Enum.Font.SourceSans })
+		recentDomainContainer:AddChild(domainName)
+		recentDomainContainer:AddChild(deleteDomain)
+
+		if Parent then Parent:AddChild(recentDomainContainer) end
+		return { domainName = domainName, recentDomainContainer = recentDomainContainer, deleteDomain = deleteDomain }
+	end
 }
 
 -- Tables
 local OSConfig: {
 	Accent: Color3,
 	Wallpaper: string | number,
-	PinnedFiles: { { string } }
+	PinnedFiles: { { string } },
+	RecentDomains: { string }
+	
 } = Disk:Read("OSConfig")
 
 local OSDirectory: {} = Disk:Read("OSDirectory")
@@ -2217,8 +2138,9 @@ local PlayerCursors = {}
 local TaskbarInfos = {}
 
 -- Micro tasks
-local MicroTaskList: { [string]: { TaskName: string, Part: PilotLua.Microcontroller } } = {}
+local MicroTaskList: { [string]: { Task: string, Part: PilotLua.Microcontroller } } = {}
 local ProcessResults = {}
+local FileCache = {} -- Mainly for .exe files that are links, so the don't need a request every time.
 
 -- File Explorer
 local FileIcons = {
@@ -2234,10 +2156,19 @@ local Sounds = {
 	Error = SpeakerHandler.CreateSound({ Id = 9075457706, Pitch = 1.5, Length = 0.25, RepeatCount = 3 })
 }
 
+type WebContent = {
+	code: string?,
+	content: string?
+}
+
 -- Constants
 local PINNED_FILES_INDEX = 5
 
 -- Functions
+local function IsLink(str)
+	return (string.match(str, "^%s*http://") or string.match(str, "^%s*https://")) ~= nil
+end
+
 local function GetFileIcon(file)
 	if typeof(file) == "table" then
 
@@ -2299,6 +2230,18 @@ local function WindowInput(prompt: string?, timeoutSeconds: number)
 	return table.unpack(result)
 end
 
+local function WindowError(errormsg: string)
+	print(errormsg)
+	
+	WindowHandler.Create({
+		Name = "Error",
+		Text = "An error has occured",
+		Color = BrickColor.new("Really red").Color
+	})
+	
+	Sounds.Error:Play()
+end
+
 local function CreateTaskbarButton(name: string, config: {Image: string | number, Text: string, Type: "List" | "Grid", WindowConfig: WindowHandler.WindowConfig, Callback: (window: WindowHandler.Window, ...any) -> () })
 	if not config.Type then
 		config.Type = "List"
@@ -2358,10 +2301,10 @@ local function GetUnusedMicro(): PilotLua.Microcontroller?
 	end
 end
 
-local function StopProcess(taskName)
+local function StopProcess(taskName: string | true)
 	for i, info in pairs(MicroTaskList) do
 
-		if info.Task == taskName then
+		if info.Task == taskName or taskName == true then
 			MicroTaskList[i] = nil
 			
 			local polysilicon = GetPartFromPort(info.Part, "Polysilicon")
@@ -2382,10 +2325,11 @@ local function ProcessResult(taskName, resultInfo)
 	if success then
 		windowConfig.Text = resultInfo[2] or "Task has completed"
 	else
-		windowConfig.Text = "An error has occured"
-		windowConfig.Color = BrickColor.new("Bright red").Color
-		print(resultInfo[2])
-		Sounds.Error:Play()
+		--windowConfig.Text = "An error has occured"
+		--windowConfig.Color = BrickColor.new("Bright red").Color
+		--print(resultInfo[2])
+		--Sounds.Error:Play()
+		WindowError(resultInfo[2])
 	end
 	
 	WindowHandler.Create(windowConfig)
@@ -2477,7 +2421,7 @@ local function OpenFile(path)
 
 	local fileName = info.Name
 	local fileType = info.Name:split(".")[2]
-	local data = info.Data
+	local data = FileCache[path] or info.Data
 
 	local windowConfig: WindowHandler.WindowConfig = {
 		Name = `File: {fileName}`
@@ -2492,8 +2436,23 @@ local function OpenFile(path)
 		local micro = GetUnusedMicro()
 
 		if micro then
-			if data:match("^http") then
-				RunStringCode(micro, data)
+			if IsLink(data) and not FileCache[path] then
+				print("Attempting to get link data")
+				local success, returned: ModemRequests.RequestResponse? = pcall(function()
+					return JSONDecode(
+						ModemRequests.GetRequest({
+							Url = data
+						})
+					)
+				end)
+				
+				if success then
+					FileCache[path] = returned.text
+					CreateProcess(fileName, returned.text, {})
+				else
+					RunStringCode(micro, data)
+				end
+				
 			else
 				CreateProcess(fileName, data, {})
 			end
@@ -2555,7 +2514,8 @@ if not OSConfig then
 	OSConfig = {
 		Accent = BrickColor.new("Bright green").Color,
 		Wallpaper = "http://www.roblox.com/asset/?id=13501991029",
-		PinnedFiles = {}
+		PinnedFiles = {},
+		RecentDomains = {}
 	}
 
 	Disk:Write("OSConfig", OSConfig)
@@ -2587,6 +2547,8 @@ if not OSDirectory then
 
 	Disk:Write("OSDirectory", OSDirectory)
 end
+
+ModemRequests.DefaultModem = Modem
 
 WindowHandler.Screen = Screen
 WindowHandler.DefaultConfig = {
@@ -2634,13 +2596,13 @@ CreateTaskbarButton("Settings", {
 		InputButton({ Button = accentButton, InputText = "Input Color3", Keyboard = Keyboard }, function(text)
 			local oldColor = OSConfig.Accent
 			local color = StringUtil.StringToColor3RGB(text)
+
+			OSConfig.Accent = color
+			WindowHandler.DefaultConfig.Color = OSConfig.Accent
 			
 			for _, v in Screen:GetElementMany({ BackgroundColor3 = oldColor }) do
 				v.BackgroundColor3 = color
 			end
-
-			OSConfig.Accent = color
-			WindowHandler.DefaultConfig.Color = color
 		end)
 
 		InputButton({ Button = wallpaperButton, InputText = "Input Image ID", Keyboard = Keyboard }, function(text)
@@ -3124,12 +3086,16 @@ CreateTaskbarButton("Processes", {
 		
 		for _, info in pairs(MicroTaskList) do
 			local label = Components.TaskManager_TaskInfo(taskListLayout)
+			label.taskManager_TaskInfo.Name = info.Task
 			label.taskName.Text = StringUtil.SplitTitleCaps(info.Task)
 			
 			label.deleteTaskButton.MouseButton1Click:Connect(function()
 				local su, er = pcall(function()
 					StopProcess(info.Task)
-					taskListLayout:Remove(label.taskManager_TaskInfo, true)
+					
+					for _, container in Screen:GetElementMany({ Name = info.Task }) do
+						taskListLayout:Remove(container, true)
+					end
 				end)
 				
 				if not su then
@@ -3180,22 +3146,6 @@ CreateTaskbarButton("Code", {
 	end,
 })
 
-CreateTaskbarButton("Radar", {
-	Type = "Grid",
-	Image = "http://www.roblox.com/asset/?id=10790307891",
-	WindowConfig = {
-		Name = "Radar",
-		Type = "Custom",
-		Color = Color3.fromHex("#2D2D2D"),
-	},
-
-	Callback = function(window)
-		local Radar = require("Radar")
-
-		print(Radar(window))
-	end,
-})
-
 CreateTaskbarButton("Music", {
 	Type = "Grid",
 	Text = "Music",
@@ -3238,7 +3188,6 @@ CreateTaskbarButton("Music", {
 	end,
 })
 
-
 LoadPinnedFiles()
 --SpeakerHandler.LoopSound(1846897737, 111)
 
@@ -3264,7 +3213,6 @@ local OSLibrary = {
 	Input = GetKeyboardInput,
 	WindowInput = WindowInput
 }
-
 
 Disk:Write("OSLibrary", setmetatable({}, { __index = OSLibrary })) -- Stupid thing to stop "table cannot be cyclic"
 
