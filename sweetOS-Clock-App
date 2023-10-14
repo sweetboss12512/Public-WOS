@@ -1,0 +1,153 @@
+-- Objects
+local Screen = OSLibrary.Screen
+local Instrument = GetPartFromPort(1, "Instrument")
+
+-- Screen Elements
+
+local background = Screen:CreateElement("Frame", { BackgroundColor3 = Color3.fromHex("#3C3C3C"), Size = UDim2.fromScale(1, 1) })
+local currentTimeTitle = Screen:CreateElement("TextLabel", { Text = "Current Time", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(0.05, 0.2), Size = UDim2.fromScale(0.4, 0.1) })
+local timeChangeLabel = Screen:CreateElement("TextLabel", { RichText = true, Text = "Time Change <br/> (Per Tick)", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(0.55, 0.2), Size = UDim2.fromScale(0.4, 0.1) })
+
+local timeChangeContainer = Screen:CreateElement("Frame", { BackgroundColor3 = Color3.fromHex("#141414"), BorderColor3 = Color3.fromHex("#646464"), BorderMode = Enum.BorderMode.Middle, BorderSizePixel = 3, Position = UDim2.fromScale(0.55, 0.35), Size = UDim2.fromScale(0.4, 0.4) })
+local minuteChangeLabel = Screen:CreateElement("TextLabel", { RichText = true, Text = "0 Minutes", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, AnchorPoint = Vector2.new(0.5, 0), BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(0.5, 0.4), Size = UDim2.fromScale(0.9, 0.15) })
+local secondChangeLabel = Screen:CreateElement("TextLabel", { RichText = true, Text = "0 Seconds", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, AnchorPoint = Vector2.new(0.5, 0), BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(0.5, 0.7), Size = UDim2.fromScale(0.9, 0.15) })
+local hourChangeContainer = Screen:CreateElement("Frame", { Active = true, AnchorPoint = Vector2.new(0.5, 0), BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(0.5, 0.1), Size = UDim2.fromScale(0.9, 0.15) })
+local hourChangeLabelNumber = Screen:CreateElement("TextLabel", { RichText = true, Text = "0", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Size = UDim2.fromScale(0.2, 1) })
+local hourChangeLabelText = Screen:CreateElement("TextLabel", { RichText = true, Text = "Hours", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, AnchorPoint = Vector2.new(1, 0), BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(1, 0), Size = UDim2.fromScale(0.75, 1) })
+local minuteChangeContainer = Screen:CreateElement("Frame", { Active = true, AnchorPoint = Vector2.new(0.5, 0), BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(0.5, 0.4), Size = UDim2.fromScale(0.9, 0.15) })
+local minuteChangeLabelNumber = Screen:CreateElement("TextLabel", { RichText = true, Text = "0", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Size = UDim2.fromScale(0.2, 1) })
+local minuteChangeLabelText = Screen:CreateElement("TextLabel", { RichText = true, Text = "Minutes", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, AnchorPoint = Vector2.new(1, 0), BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(1, 0), Size = UDim2.fromScale(0.75, 1) })
+local secondsChangeContainer = Screen:CreateElement("Frame", { Active = true, AnchorPoint = Vector2.new(0.5, 0), BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(0.5, 0.7), Size = UDim2.fromScale(0.9, 0.15) })
+local secondsChangeLabelNumber = Screen:CreateElement("TextLabel", { RichText = true, Text = "0", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Size = UDim2.fromScale(0.2, 1) })
+local secondsChangeLabelText = Screen:CreateElement("TextLabel", { RichText = true, Text = "Seconds", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, AnchorPoint = Vector2.new(1, 0), BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(1, 0), Size = UDim2.fromScale(0.75, 1) })
+local bottomFrame = Screen:CreateElement("TextLabel", { Text = "", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, AnchorPoint = Vector2.new(0, 1), BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(0, 1), Size = UDim2.fromScale(1, 0.1) })
+local currentHourContainer = Screen:CreateElement("Frame", { BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(0.05, 0.35), Size = UDim2.fromScale(0.4, 0.4) })
+local currentHourLabel = Screen:CreateElement("TextLabel", { RichText = true, Text = "12", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Size = UDim2.fromScale(1, 0.5) })
+local timeSuffixLabel = Screen:CreateElement("TextLabel", { RichText = true, Text = "AM", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, AnchorPoint = Vector2.new(0, 1), BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(0, 1), Size = UDim2.fromScale(1, 0.5) })
+local totalTimeLabel = Screen:CreateElement("TextLabel", { RichText = true, Text = "00 : 00 : 00", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, AnchorPoint = Vector2.new(0.5, 0), BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(0.5, 1.1), Size = UDim2.fromScale(0.8, 0.2), Visible = false })
+
+background:AddChild(currentTimeTitle)
+
+background:AddChild(timeChangeLabel)
+
+background:AddChild(timeChangeContainer)
+timeChangeContainer:AddChild(minuteChangeLabel)
+timeChangeContainer:AddChild(secondChangeLabel)
+timeChangeContainer:AddChild(hourChangeContainer)
+hourChangeContainer:AddChild(hourChangeLabelNumber)
+hourChangeContainer:AddChild(hourChangeLabelText)
+timeChangeContainer:AddChild(minuteChangeContainer)
+minuteChangeContainer:AddChild(minuteChangeLabelNumber)
+minuteChangeContainer:AddChild(minuteChangeLabelText)
+timeChangeContainer:AddChild(secondsChangeContainer)
+secondsChangeContainer:AddChild(secondsChangeLabelNumber)
+secondsChangeContainer:AddChild(secondsChangeLabelText)
+
+background:AddChild(bottomFrame)
+
+background:AddChild(currentHourContainer)
+currentHourContainer:AddChild(currentHourLabel)
+currentHourContainer:AddChild(timeSuffixLabel)
+
+background:AddChild(totalTimeLabel)
+
+local Window = OSLibrary.WindowHandler.Create({
+	Name = "Clock",
+	Type = "Custom",
+	Color = background.BackgroundColor3
+})
+
+Window:AddChild(background)
+
+-- Constants
+local TICKS_TO_WAIT = 5
+
+-- Functions
+local function TimeToSeconds(str)
+	local split = str:split(":")
+
+	local hourSeconds = split[1] * 3600
+	local minuteSeconds = split[2] * 60
+	local seconds = split[3]
+
+	return hourSeconds + minuteSeconds + seconds
+end
+
+task.spawn(function()
+	--local lastTime = TimeToSeconds(Instrument:GetReading(3))
+	
+	while true do
+		task.wait(1)
+		local hours = 0
+		local minutes = 0
+		local seconds = 0
+		
+		-- Bad code to figure out the average change.
+		for i = 1, TICKS_TO_WAIT do
+			local lastTime = TimeToSeconds(Instrument:GetReading(3))
+			task.wait(1)
+			local currentTime = TimeToSeconds(Instrument:GetReading(3))
+			local difference = currentTime - lastTime
+
+			local hourChange = math.floor(difference / 3600)
+			local minuteChange = math.floor(difference / 60)
+			local secondChange = difference
+			
+			while minutes > 60 do
+				minutes -= 60
+				hours += 1
+			end
+			
+			--while seconds > 60 do
+			--	seconds -= 60
+			--	minutes += 1
+			--end
+			
+			hours += hourChange
+			minutes += minuteChange
+			seconds += secondChange
+		end
+		
+		hours /= TICKS_TO_WAIT
+		minutes /= TICKS_TO_WAIT
+		seconds /= TICKS_TO_WAIT
+		
+		hourChangeLabelNumber.Text = math.round(hours)
+		minuteChangeLabelNumber.Text = math.round(minutes)
+		secondsChangeLabelNumber.Text = math.round(seconds)
+	end
+end)
+
+while true do
+	task.wait(3)
+	
+	local currentTime = Instrument:GetReading(3):split(":")
+	local hourRaw = tonumber(currentTime[1])
+	local hour12 = hourRaw % 12
+	local minutes = tonumber(currentTime[2])
+	local seconds = tonumber(currentTime[3])
+	
+	local suffix
+	local suffixColor
+	local isPM = (hourRaw / 12) >= 1
+	
+	if hour12 == 0 then
+		hour12 = 12
+	end
+	
+	if isPM then
+		suffix = "PM"
+	else
+		suffix = "AM"
+	end
+	
+	if suffix == "PM" and hour12 > 6 then
+		timeSuffixLabel.TextColor3 = Color3.fromRGB(107, 50, 124)
+	else
+		timeSuffixLabel.TextColor3 = Color3.fromRGB(253, 234, 141)
+	end
+	
+	currentHourLabel.Text = hour12
+	timeSuffixLabel.Text = suffix
+	totalTimeLabel.Text = Instrument:GetReading(3):gsub(":", " : ")
+end
