@@ -66,27 +66,6 @@ WOS_MODULES.TableUtility = function()
 		return chosen, dict[chosen]
 	end
 	
-	function module.PrintTable(tble, indent) -- just for WOS debuging
-		local snippet = setmetatable({}, { __index = table })
-		indent = indent or 1
-		
-		snippet:insert("{")
-		local indentStr = string.rep("\t", indent)
-		
-		for index, value in tble do
-			if type(value) == "table" then
-				value = module.PrintTable(value, indent + 1)
-			end
-			
-			snippet:insert(`{indentStr}[{index}] = {value}`)
-		end
-		
-		snippet:insert("}")
-		
-		local str = table.concat(snippet, "\n")
-		return str
-	end 
-	
 	return module
 end
 
@@ -106,6 +85,317 @@ WOS_MODULES.MusicPlayerIds = function()
 	--6667206702 length:2.763 pitch:1.5
 	
 	return module
+end
+
+WOS_MODULES.GridLayout = function()
+	export type GridLayoutInfo = {
+		Padding: UDim2?,
+		CellSize: UDim2?,
+		StartPosition: UDim2?,
+		FillDirection: Enum.FillDirection?
+	}
+	
+	local function GridLayout(parent, config: GridLayoutInfo)
+		local self = {
+			Parent = parent,
+			_Children = {},
+			_Config = config
+		}
+	
+		local function scaleUdim2(udim2: UDim2)
+			local absoluteSize = self.Parent.AbsoluteSize
+	
+			local scaleX = udim2.X.Scale + (udim2.X.Offset / absoluteSize.X)
+			local scaleY = udim2.Y.Scale + (udim2.Y.Offset / absoluteSize.Y)
+	
+			return UDim2.fromScale(scaleX, scaleY)
+		end
+	
+		if config.StartPosition then
+			config.StartPosition = scaleUdim2(config.StartPosition)
+		else
+			config.StartPosition = UDim2.fromScale(0, 0)
+		end
+	
+		config.CellSize = scaleUdim2(config.CellSize) -- Convert everything to scale. Easier to use to me because i suck
+		config.Padding = scaleUdim2(config.Padding)
+	
+		function self:AddChild(child: GuiObject)
+			child.Size = config.CellSize
+			self.Parent:AddChild(child)
+	
+			local lastChild: GuiObject = self._Children[#self._Children]
+			local position = config.StartPosition
+	
+			if lastChild then
+				position = UDim2.fromScale(position.X.Scale, lastChild.Position.Y.Scale)
+				local spaceLeft = lastChild.Position.X.Scale + config.CellSize.X.Scale + config.Padding.X.Scale + (config.CellSize.X.Scale / 2) -- Uhh this just works
+	
+				if spaceLeft < 1 then
+					position = UDim2.fromScale(lastChild.Position.X.Scale + config.CellSize.X.Scale + config.Padding.X.Scale, lastChild.Position.Y.Scale)
+				else
+					position += UDim2.fromScale(0, config.CellSize.Y.Scale + config.Padding.Y.Scale)
+				end
+			end
+	
+			child.Position = position
+			table.insert(self._Children, child)
+		end
+	
+		function self:Refresh()
+			config.CellSize = scaleUdim2(config.CellSize)
+			config.Padding = scaleUdim2(config.Padding)
+			
+			local clone = table.clone(self._Children)
+			self._Children = {}
+	
+			for _, v in ipairs(clone) do
+				self:AddChild(v)
+			end
+		end
+	
+		function self:Remove(childIndex, destroyChild: boolean)
+			local index = childIndex
+	
+			if typeof(childIndex) ~= "number" then
+				index = table.find(self._Children, childIndex)
+			end
+	
+			if not index then
+				print(("[Grid Layout]: Child was not found. Cannot remove."))
+				return
+			end
+	
+			local child = self._Children[index]
+			table.remove(self._Children, index)
+	
+			if destroyChild then
+				child:Destroy()
+			end
+	
+			self:Refresh()
+		end
+		
+		function self:Destroy()
+			table.clear(self)
+		end
+		
+		return self
+	end
+	
+	export type GridLayout = typeof(GridLayout())
+	
+	return GridLayout
+end
+
+WOS_MODULES.ScreenPlus = function()
+	-- thingy that adds a few methods to screens
+	
+	-- Tables
+	local SpecialProperties = { -- properties that don't arent readable / don't work / don't really exist
+		"Parent",
+		"Visible"
+	}
+	
+	local function WrapElement(element, screen: Screen): ScreenElement
+		local wrap = {}
+		local valueTable = {}
+		local mt = {}
+	
+		wrap.ClassName = "ScreenElement" -- This may cause some issues
+		wrap.ElementClass = element.ClassName :: string
+		wrap._Element = element
+		wrap._Screen = screen
+	
+		function wrap:AddChild(child: ScreenElement?)
+			if child.ClassName ~= "ScreenElement" then -- Temporary fix for the radar code
+				--error("[ScreenPlus.Element:AddChild]: Provided child is not a ScreenPlus element.")
+				wrap._Element:AddChild(child)
+				return
+			end
+			
+			child.Parent = wrap
+		end
+		
+		function wrap:Clone(): ScreenElement
+			local properties = table.clone(valueTable)
+			local clone = wrap._Screen:CreateElement(wrap._Element.ClassName, properties)
+			
+			for _, v in ipairs(wrap._Screen:GetElementMany({ Parent = wrap })) do -- Deep copy
+				v:Clone().Parent = clone
+			end
+			
+			--if wrap.Parent then
+			--	clone.Parent = wrap.Parent
+			--end
+			
+			return clone
+		end
+		
+		function wrap:ClearAllChildren()
+			for _, v in wrap._Screen:GetElementMany({Parent = wrap}) do
+				v:Destroy()
+			end
+		end
+	
+		function wrap:Destroy()
+			wrap:ClearAllChildren()
+			element:Destroy()
+	
+			local index = table.find(wrap._Screen._Elements, wrap)
+			table.remove(screen._Elements, index)
+			
+			setmetatable(wrap, nil)
+			table.clear(wrap)
+			table.clear(valueTable)
+		end
+	
+		mt.__newindex = function(_, index, newValue) -- TODO find a way to clean this up a bit
+			valueTable[index] = newValue
+			
+			if index == "Parent" and typeof(newValue) == "table" then
+				newValue._Element:AddChild(element)
+			end
+	
+			if index == "Size" and not valueTable.Visible then
+				return
+			end
+			
+			if index == "Visible" then
+				if newValue then
+					element.Size = valueTable.Size
+				else
+					element.Size = UDim2.fromScale(0, 0)
+				end
+			end
+			
+			assert(newValue ~= valueTable, "bro what???")
+	
+			if element[index] ~= nil and not table.find(SpecialProperties, index) then
+				element[index] = newValue
+			end
+		end
+	
+		mt.__index = function(_, index)
+			assert(index ~= valueTable, "what the heck??? __index")
+			
+			if valueTable[index] ~= nil then
+				return valueTable[index]
+			else
+				return element[index]
+			end
+		end
+	
+		setmetatable(wrap, mt)
+		return wrap
+	end
+	
+	local function ScreenPlus(object): Screen
+		if not object then
+			error("[ScreenPlus]: Provided value is not a screen")
+		end
+		
+		local screen = setmetatable({}, { __index = object })
+		
+		screen.ClassName = "ScreenPlus"
+		screen._Object = object
+		screen._Elements = {}
+		
+		function screen:CreateElement(className: string, properties: { Parent: ScreenElement, Visible: boolean, [string]: any }): ScreenElement
+			local removedProperties = {
+				Visible = true
+			}
+			
+			for index, value in properties do -- Remove special properties so the actual element doesnt error since they are invalid
+				if table.find(SpecialProperties, index) then
+					removedProperties[index] = value
+					properties[index] = nil -- So there aren't any errors
+				end
+			end
+			
+			local element = screen._Object:CreateElement(className, properties)
+			local wrapped = WrapElement(element, screen)
+			
+			for index, value in properties do
+				wrapped[index] = value
+			end
+			
+			for index, value in removedProperties do
+				wrapped[index] = value
+			end
+	
+			table.insert(screen._Elements, wrapped)
+			return wrapped
+		end
+	
+		function screen:GetElement(filter: {}): ScreenElement?
+			if typeof(filter) ~= "table" then
+				error("[Screen:GetElement]: A filter dict as an argument is required")
+			end
+	
+			for _, element in ipairs(screen._Elements) do
+				local isMatch = true
+	
+				for k, v in filter do
+	
+					if element[k] ~= v then
+						isMatch = false
+					end
+				end
+				
+				if isMatch then
+					return element
+				end
+			end
+		end
+	
+		function screen:GetElementMany(filter: {} | nil): { ScreenElement }
+			local elements = {}
+	
+			for _, element in ipairs(screen._Elements) do
+				local isMatch = true
+	
+				if filter then
+					for k, v in filter do
+	
+						if element[k] ~= v then
+							isMatch = false
+							break
+						end
+					end
+				end
+	
+				if not isMatch then
+					continue
+				end
+	
+				table.insert(elements, element)
+			end
+	
+			return elements
+		end
+	
+		function screen:ClearElements()
+	
+			for _, element in screen._Elements do -- So they can be removed from the elements table.
+				element:Destroy()
+			end
+	
+			screen._Object:ClearElements()
+		end
+	
+		return screen
+	end
+	
+	export type Screen = typeof(ScreenPlus())
+	export type ScreenElement =  {
+		ClassName: "ScreenElement",
+		Parent: ScreenElement,
+		Visible: boolean
+	
+	} & typeof(WrapElement())
+	
+	return ScreenPlus
 end
 
 WOS_MODULES.StringUtility = function()
@@ -140,129 +430,23 @@ WOS_MODULES.StringUtility = function()
 		return Vector3.new(x, y, z)
 	end
 	
+	function module.MatchSplit(str: string, patten: string)
+		local split = {}
+		
+		for v in str:gmatch(patten) do
+			table.insert(split, v)
+		end
+		
+		return split
+	end
+	
 	return module
 end
 
-WOS_MODULES.ListLayoutV2 = function()
-	export type ListLayoutInfo = {
-		Padding: UDim,
-		StartPosition: UDim,
-		CenterObjects: boolean,
-		FillDirection: Enum.FillDirection,
-		HorizontalAlignment: Enum.HorizontalAlignment
-	}
-	
-	local function ListLayout(parent, config: ListLayoutInfo): ListLayout
-		local layout = {
-			Parent = parent,
-			_Children = {},
-			_Config = config
-		}
-		
-		config.FillDirection = config.FillDirection or Enum.FillDirection.Vertical
-		config.StartPosition = config.StartPosition or UDim.new(0, 0)
-		config.Padding = config.Padding or UDim.new(0, 0)
-		
-		function layout:AddChild(screenObject)
-			if not layout.Parent then
-				error("[ListLayout:AddChild]: ListLayout has no parent")
-			end
-			
-			if table.find(layout._Children, screenObject) then
-				return
-			end
-	
-			local position
-			local lastChild = layout._Children[#layout._Children]
-	
-			if config.FillDirection == Enum.FillDirection.Vertical then
-				position = UDim2.new(0, 0, config.StartPosition.Scale, config.StartPosition.Offset)
-	
-				if lastChild then
-					local yScale = lastChild.Position.Y.Scale + lastChild.Size.Y.Scale
-					local yOffset = lastChild.Position.Y.Offset + lastChild.Size.Y.Offset
-	
-					position = UDim2.new(0, 0, yScale + config.Padding.Scale, yOffset + config.Padding.Offset)
-				end
-	
-				if config.CenterObjects then
-					screenObject.AnchorPoint = Vector2.new(0.5, screenObject.AnchorPoint.Y)
-					position += UDim2.fromScale(0.5, 0)
-				end
-	
-			elseif config.FillDirection == Enum.FillDirection.Horizontal then
-				position = UDim2.new(config.StartPosition.Scale, config.StartPosition.Offset, 0, 0)
-	
-				if lastChild then
-					local xScale = lastChild.Position.X.Scale + lastChild.Size.X.Scale
-					local xOffset = lastChild.Position.X.Offset + lastChild.Size.X.Offset
-	
-					position = UDim2.new(xScale + config.Padding.Scale, xOffset + config.Padding.Offset, 0, 0)
-				end
-				
-				if config.CenterObjects then
-					screenObject.AnchorPoint = Vector2.new(0.5, screenObject.AnchorPoint.X)
-					position += UDim2.fromScale(0, 0.5)
-				end
-			else
-				error("[LIST LAYOUT]: Invalid fill direction. FillDirection must be An Enum.FillDirection")
-			end
-	
-			screenObject.Position = position
-			layout.Parent:AddChild(screenObject)
-			table.insert(layout._Children, screenObject)
-		end
-	
-		function layout:Refresh()
-			local oldChildren = layout._Children
-			layout._Children = {}
-	
-			for _, v in ipairs(oldChildren) do
-				layout:AddChild(v)
-			end
-	
-			oldChildren = nil
-		end
-	
-		function layout:Remove(childIndex, destroyChild: boolean)
-			local index = childIndex
-	
-			if typeof(childIndex) ~= "number" then
-				index = table.find(layout._Children, childIndex)
-			end
-	
-			if not index then
-				--print(("[LIST LAYOUT]: Child was not found. Cannot remove."))
-				return
-			end
-	
-			local child = layout._Children[index]
-			table.remove(layout._Children, index)
-	
-			if destroyChild then
-				child:Destroy()
-			end
-	
-			layout:Refresh()
-		end
-	
-		function layout:Destroy()
-			table.clear(layout)
-		end
-	
-		return layout
-	end
-	
-	export type ListLayout = typeof(ListLayout())
-	
-	return ListLayout
-end
-
 WOS_MODULES.PilotLua = function()
-	-- Made by ArvidSilverlock
+	-- Made by ArvidSilverlock. Edited by sweetboss151
 	
-	type Part = "Port" | "Gyro" | "Keyboard" | "Microphone" | "LifeSensor" | "Instrument" | "EnergyShield" | "Disk" | "Bin" | "Modem" | "Screen" | "TouchSensor" | "Rail" | "StarMap" | "Telescope" | "Speaker" | "Reactor" | "Dispenser" | "Polysilicon" | "Microcontroller" | "HyperDrive" | "BlackBox"
-	
+	type Part = "Wood" | "DelayWire" | "Hatch" | "Boiler" | "Extractor" | "BurstLaser" | "Apparel" | "CloningBay" | "Lead" | "BlastingCap" | "Filter" | "Antenna" | "Instrument" | "Teleporter" | "Stick" | "Laser" | "Goo" | "WaterCooler" | "ExoticMatter" | "ReinforcedGlass" | "Explosive" | "Fence" | "Servo" | "DriveBox" | "TimeSensor" | "ElectricFence" | "EnergyBomb" | "Pump" | "Assembler" | "Diode" | "Neon" | "Keyboard" | "Cement" | "StasisField" | "EnergyGun" | "LightBridge" | "Ball" | "Perfectium" | "WirelessButton" | "DarkConverter" | "Disk" | "LightTube" | "LifeSensor" | "SteamTurbine" | "Brick" | "Warhead" | "Transformer" | "Fireworks" | "Cleat" | "Melter" | "PowerCell" | "PlasmaCannon" | "Piston" | "Treads" | "Marble" | "CrudeWing" | "Quartz" | "Primer" | "Microcontroller" | "Plutonium" | "Speaker" | "Cloth" | "Stone" | "SoundMuffler" | "VehicleSeat" | "RoundWedge" | "Winch" | "TriggerWire" | "RTG" | "Transporter" | "Controller" | "Obelisk" | "Motor" | "Aluminum" | "Telescope" | "Spotlight" | "Reactor" | "Prosthetic" | "RoundWedge2" | "Decoupler" | "Snow" | "Heater" | "Tile" | "TriggerSwitch" | "SolarPanel" | "Boombox" | "Igniter" | "DeleteSwitch" | "Electromagnet" | "SpawnPoint" | "Rubber" | "Scrapper" | "Ruby" | "Gun" | "Flamethrower" | "Light" | "Balloon" | "Kiln" | "Glass" | "Sail" | "Rail" | "Beryllium" | "Polysilicon" | "BallastTank" | "Pulverizer" | "Gear" | "Cannon" | "CornerRoundWedge2" | "Tetrahedron" | "Pipe" | "EthernetCable" | "AutomaticLaser" | "Faucet" | "Thruster" | "CombustionTurbine" | "TouchScreen" | "Camera" | "Modem" | "Coal" | "Radar" | "FireWood" | "MiningLaser" | "Container" | "TintedGlass" | "IonRocket" | "Generator" | "Asphalt" | "Ice" | "StarMap" | "Sulfur" | "Coupler" | "Door" | "Cylinder" | "Wedge" | "CornerTetra" | "PlutoniumCore" | "Seat" | "Cone" | "HalfSphere" | "Blade" | "CornerRoundWedge" | "Valve" | "Anchor" | "Screen" | "Truss" | "Freezer" | "Hull" | "Port" | "Handle" | "RemoteControl" | "Cooler" | "Food" | "FloatDevice" | "Railgun" | "RustedMetal" | "Refinery" | "Wing" | "Rocket" | "Flint" | "Button" | "RegionCloaker" | "Tire" | "Artillery" | "Diamond" | "Gold" | "DarkReactor" | "Beacon" | "SolarScoop" | "AirSupply" | "Constructor" | "Iron" | "Rotor" | "Propeller" | "BurnerGenerator" | "Framewire" | "AlienCore" | "EnergyShield" | "Wire" | "TouchSensor" | "StorageSensor" | "Neutronium" | "ImpulseCannon" | "Aerogel" | "Microphone" | "GeigerCounter" | "Hologram" | "ZapWire" | "Turbofan" | "Dispenser" | "Hydroponic" | "TemperatureSensor" | "GravityGenerator" | "Engine" | "Gyro" | "ObjectDetector" | "StudAligner" | "Sign" | "Chute" | "ConveyorBelt" | "Grass" | "Shotgun" | "Titanium" | "DarkMatter" | "Battery" | "Relay" | "Obamium" | "Magnesium" | "Uranium" | "Jade" | "Bin" | "Plastic" | "CornerWedge" | "Copper" | "SteamEngine" | "HyperDrive" | "BlackBox" | "NuclearWaste" | "Heatshield" | "Sand" | "Silicon" | "Switch"
 	type JSONValue = string | number | boolean
 	type JSON = { [JSONValue]: JSON } | JSONValue
 	
@@ -278,7 +462,7 @@ WOS_MODULES.PilotLua = function()
 		GUID: string,
 		Position: Vector3,
 		CFrame: CFrame,
-		[string]: any,
+		--[string]: any,
 	}
 	
 	export type Other = {
@@ -590,6 +774,11 @@ WOS_MODULES.PilotLua = function()
 		ClassName: "BlackBox",
 		Connect: EventConnector<BlackBox, "GetLogs">,
 		Configure: DefaultConfigure<BlackBox>,
+		GetLogs: (self: BlackBox) -> {{
+			Event: string,
+			Desc: string,
+			TimeAgo: number
+		}}
 	} & PilotObject
 	
 	export type Switch = {
@@ -663,7 +852,9 @@ WOS_MODULES.PilotLua = function()
 		}) -> ()
 	} & PilotObject
 	
-	export type CoordinateIterator = (invariant: any, index: number) -> (nil, string)
+	export type CoordinateIterator = (invariant: any, index: number) -> (string, {
+		Type: string
+	})
 	
 	export type RegionInfo = {
 		Type: "Planet",
@@ -710,20 +901,42 @@ WOS_MODULES.PilotLua = function()
 		Pressed: boolean
 	}
 	
-	local f = function(...) return end
-	
+	--type WhenRegionLoadsData = { -- Too lazy to finish this.
+	--	EnterLocation: {
+	--		X: number,
+	--		Y: number,
+	--		Z: number
+	--	},
+		
+	--	StringCoordinate: string,
+	--	RegionSeed: number,
+	--	RegionType: "Orbit" | "Planet",
+	--	Name: string,
+	--	RegionServer: string,
+	--	RegionID: string,
+	--	OrbitBody: {
+			
+	--	}
+	--}
+	  
 	return {
-		GetPartFromPort = f :: (port: number | PilotObject, partType: Part | string) -> PilotObject,
-		GetPartsFromPort = f :: (port: number | PilotObject, partType: Part | string) -> {PilotObject},
+		GetPartFromPort = GetPartFromPort :: (port: number | PilotObject, partType: Part | string) -> PilotObject?,
+		GetPartsFromPort = GetPartsFromPort :: (port: number | PilotObject, partType: Part | string) -> {PilotObject},
 	
-		JSONEncode = f :: (data: JSON) -> string,
-		JSONDecode = f :: (json: string) -> JSON,
+		JSONEncode = JSONEncode :: (data: JSON) -> string,
+		JSONDecode = JSONDecode :: (json: string) -> JSON,
 	
-		TriggerPort = f :: (port: number | PilotObject) -> (),
-		GetPort = f :: (port: number) -> Port,
+		TriggerPort = TriggerPort :: (port: number | PilotObject) -> (),
+		GetPort = GetPort :: (port: number) -> Port,
 	
-		Beep = f :: (pitch: number) -> ()
+		Beep = Beep :: (pitch: number) -> ()
 	}
+	
+	--[[
+	local GetPartFromPort, GetPartsFromPort, TriggerPort, GetPort, JSONEncode, JSONDecode, Beep =
+		PilotLua.GetPartFromPort, PilotLua.GetPartsFromPort, PilotLua.TriggerPort, PilotLua.GetPort,
+		PilotLua.JSONEncode, PilotLua.JSONDecode, PilotLua.Beep
+	--]]
 end
 
 WOS_MODULES.SpeakerHandler = function()
@@ -935,242 +1148,23 @@ WOS_MODULES.SpeakerHandler = function()
 	return SpeakerHandler
 end
 
-WOS_MODULES.ScreenPlus = function()
-	-- thingy that adds a few methods to screens
+WOS_MODULES.CommandPrompt = function()
+	local ScreenPlus = require("ScreenPlus")
+	local WindowHandler = require("WindowHandler")
 	
-	-- Tables
-	local SpecialProperties = { -- properties that don't arent readable / don't work / don't really exist
-		"Parent",
-		"Visible"
-	}
-	
-	local function WrapElement(element, screen: Screen): ScreenElement
-		local wrap = {}
-		local valueTable = {}
-		local mt = {}
-	
-		wrap.ClassName = "ScreenElement" -- This may cause some issues
-		wrap.ElementClass = element.ClassName :: string
-		wrap._Element = element
-		wrap._Screen = screen
-	
-		function wrap:AddChild(child: ScreenElement?)
-			if child.ClassName ~= "ScreenElement" then -- Temporary fix for the radar code
-				--error("[ScreenPlus.Element:AddChild]: Provided child is not a ScreenPlus element.")
-				wrap._Element:AddChild(child)
-				return
-			end
-			
-			child.Parent = wrap
-		end
-		
-		function wrap:Clone(): ScreenElement
-			local properties = table.clone(valueTable)
-			local clone = wrap._Screen:CreateElement(wrap._Element.ClassName, properties)
-			
-			for _, v in ipairs(wrap._Screen:GetElementMany({ Parent = wrap })) do -- Deep copy
-				v:Clone().Parent = clone
-			end
-			
-			if wrap.Parent then
-				clone.Parent = wrap.Parent
-			end
-			
-			return clone
-		end
-		
-		function wrap:ClearAllChildren()
-			for _, v in wrap._Screen:GetElementMany({Parent = wrap}) do
-				v:Destroy()
-			end
-		end
-	
-		function wrap:Destroy()
-			wrap:ClearAllChildren()
-			element:Destroy()
-	
-			local index = table.find(wrap._Screen._Elements, wrap)
-			table.remove(screen._Elements, index)
-			
-			setmetatable(wrap, nil)
-			table.clear(wrap)
-			table.clear(valueTable)
-		end
-	
-		mt.__newindex = function(_, index, newValue) -- TODO find a way to clean this up a bit
-			valueTable[index] = newValue
-			
-			if index == "Parent" and typeof(newValue) == "table" then
-				newValue._Element:AddChild(element)
-			end
-	
-			if index == "Size" and not valueTable.Visible then
-				return
-			end
-			
-			if index == "Visible" then
-				if newValue then
-					element.Size = valueTable.Size
-				else
-					element.Size = UDim2.fromScale(0, 0)
-				end
-			end
-			
-			assert(newValue ~= valueTable, "bro what???")
-	
-			if element[index] ~= nil and not table.find(SpecialProperties, index) then
-				element[index] = newValue
-			end
-		end
-	
-		mt.__index = function(_, index)
-			assert(index ~= valueTable, "what the heck??? __index")
-			
-			if valueTable[index] ~= nil then
-				return valueTable[index]
-			else
-				return element[index]
-			end
-		end
-	
-		setmetatable(wrap, mt)
-		return wrap
-	end
-	
-	local function ScreenPlus(object): Screen
-		if not object then
-			error("[ScreenPlus]: Provided value is not a screen")
-		end
-		
-		local screen = setmetatable({}, { __index = object })
-		
-		screen.ClassName = "ScreenPlus"
-		screen._Object = object
-		screen._Elements = {}
-		
-		function screen:CreateElement(className: string, properties: { Parent: ScreenElement, Visible: boolean, [string]: any }): ScreenElement
-			local removedProperties = {
-				Visible = true
-			}
-			
-			for index, value in properties do -- Remove special properties so the actual element doesnt error since they are invalid
-				if table.find(SpecialProperties, index) then
-					removedProperties[index] = value
-					properties[index] = nil -- So there aren't any errors
-				end
-			end
-			
-			local element = screen._Object:CreateElement(className, properties)
-			local wrapped = WrapElement(element, screen)
-			
-			for index, value in properties do
-				wrapped[index] = value
-			end
-			
-			for index, value in removedProperties do
-				wrapped[index] = value
-			end
-	
-			table.insert(screen._Elements, wrapped)
-			return wrapped
-		end
-	
-		function screen:GetElement(filter: {}): ScreenElement?
-			if typeof(filter) ~= "table" then
-				error("[Screen:GetElement]: A filter dict as an argument is required")
-			end
-	
-			for _, element in ipairs(screen._Elements) do
-				local isMatch = true
-	
-				for k, v in filter do
-	
-					if element[k] ~= v then
-						isMatch = false
-					end
-				end
-				
-				if isMatch then
-					return element
-				end
-			end
-		end
-	
-		function screen:GetElementMany(filter: {} | nil): { ScreenElement }
-			local elements = {}
-	
-			for _, element in ipairs(screen._Elements) do
-				local isMatch = true
-	
-				if filter then
-					for k, v in filter do
-	
-						if element[k] ~= v then
-							isMatch = false
-							break
-						end
-					end
-				end
-	
-				if not isMatch then
-					continue
-				end
-	
-				table.insert(elements, element)
-			end
-	
-			return elements
-		end
-	
-		function screen:ClearElements()
-	
-			for _, element in screen._Elements do -- So they can be removed from the elements table.
-				element:Destroy()
-			end
-	
-			screen._Object:ClearElements()
-		end
-	
-		return screen
-	end
-	
-	export type Screen = typeof(ScreenPlus())
-	export type ScreenElement =  {
-		ClassName: "ScreenElement",
-		Parent: ScreenElement,
-		Visible: boolean
-	
-	} & typeof(WrapElement())
-	
-	return ScreenPlus
-end
-
-WOS_MODULES.FileHandler = function()
 	-- Modules
 	local ListLayout = require("ListLayoutV2")
+	local FileHandler = require("FileHandler")
 	
 	-- Tables
-	local Commands = {}
+	local CommandPrompt = { Commands = {}, Screen = nil :: ScreenPlus.Screen, Window = nil :: WindowHandler.Window }
+	local Commands = CommandPrompt.Commands
 	local CommandNames = {}
-	local FileHandler = { StartDirectory = "OS", Directory = nil, Screen = nil, Keyboard = nil }
-	
-	local CommandLineLabels = {}
-	
-	FileHandler.FileTypes = {
-		"txt",
-		"img",
-		"exe",
-		"aud",
-	}
-	
-	-- Variables
-	local window
-	local keyboardConnection
 	
 	-- Functions
 	local function ClearCommandLine()
-		for _, label in pairs(CommandLineLabels) do
-			window.Layout:Remove(label, true)
+		for _, label in CommandPrompt.Screen:GetElementMany({Name = "CommandLine"}) do
+			CommandPrompt.Window.Layout:Remove(label, true)
 		end
 	end
 	
@@ -1178,187 +1172,88 @@ WOS_MODULES.FileHandler = function()
 		if not text then
 			return
 		end
-		
-		if not window or window.Destroyed then
-			return "No window!!!"
-		end
-		
+	
 		indentLevel =  indentLevel or 0
-		local label = FileHandler.Screen:CreateElement("TextLabel", { TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, BackgroundTransparency = 1, Size = UDim2.fromScale(1, 0.07), Font = Enum.Font.SourceSans })
-		
+		local label = CommandPrompt.Screen:CreateElement("TextLabel", { Name = "CommandLine", TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, BackgroundTransparency = 1, Size = UDim2.fromScale(1, 0.07), Font = Enum.Font.SourceSans })
+	
 		text = string.rep("\t", indentLevel)..text
-		
+	
 		if pathSpecify then
 			text = "sweetOS"..">"..text
 		end
-		
+	
 		label.Text = text
 	
-		window:AddChild(label)
-		table.insert(CommandLineLabels, label)
+		CommandPrompt.Window:AddChild(label)
 		return label
 	end
 	
-	local function KeyboardInput(text: string, playerName: string)
-		print("text inputted")
-		if not window or window.Destroyed then
-			keyboardConnection:Unbind()
-			keyboardConnection = nil
-			
-			window = nil
-			print("Window is gone")
-			return
-		end
-		
-		text = text:gsub("\n", "")
-		CommandLine(text, nil, true)
-	
+	local function RunCommand(text: string)
 		local arguments = text:split(" ")
 		local commandName = arguments[1]:lower()
 		table.remove(arguments, 1)
 	
-		if commandName:match("^%s*$") then
-			return
-		end
-	
 		local command = CommandNames[commandName]
 	
 		if not command then
-			CommandLine(`Command {commandName} was not found`)
-			CommandLine("", nil, true)
+			print("[CommandPrompt]: Command Not Found")
 			return
-		end
-	
-		if command.Tags then
-			for index, argument in ipairs(command.Tags) do
-				local argString = `{argument:lower()} %"(.+)"`
-				local x, y = text:lower():find(argString) -- string.find so uppsercase letters can be added back later.
-	
-				if x then
-					arguments[index] = text:sub(x + #argument + 2, y - 1) -- String.find is really stupid. plus 2 becuase of the equal and bracket.
-				end
-			end
 		end
 	
 		local success, returned = pcall(command.Callback, arguments, table.concat(arguments, " "))
 	
-		if success then
-			CommandLine(returned)
-			print(returned)
-		else
-			print(returned)
-			CommandLine("Error running command")
-			CommandLine(returned)
-			CommandLine("", nil, true)
-		end
-	
-		CommandLine("", nil, true)
+		print(returned)
+		return success, returned
 	end
 	
-	function FileHandler.GetPathInfo(path) -- Must be absolute path :sob:
-		path = path:gsub("\\", "/") -- So backslashes work
-		path = path:gsub("^/+", "")
-		path = path:gsub("^"..FileHandler.StartDirectory, "")
-		--path = path:gsub(" ", "")
-		
-		local hirearchy = string.split(path, "/")
-		
-		local parent
-		local file = FileHandler.Directory[FileHandler.StartDirectory]
-		local fileIndex: string
-		
-		if path:match("^%s*$") or #path == 0 then
-			return {
-				Data = file,
-				Parent = file
-			}
+	CommandPrompt.Update = function()
+		for mainName, command in pairs(CommandPrompt.Commands) do
+			CommandNames[mainName:lower()] = command
+	
+			if command.Usages then
+				for _, usage in pairs(command.Usages) do
+					CommandNames[usage:lower()] = command
+				end
+			end
 		end
+	end
+	
+	CommandPrompt.Init = function(window, keyboard)
+		CommandPrompt.Window = window
+		CommandPrompt.Update()
 		
-		for _, fileName in ipairs(hirearchy) do
-			if file[fileName] then
-				parent = file
-				file = file[fileName]
-				fileIndex = fileName
+		window.Layout = ListLayout(window, {
+			Padding = UDim.new(0, 0)
+		})
+		
+		local connection
+		
+		connection = keyboard:Connect("TextInputted", function(text)
+			text = text:gsub("\n*$", "")
+			
+			if window.Destroyed then
+				connection:Unbind()
+				connection = nil
+				return
+			end
+			
+			text = text:gsub("\n*$", "")
+	
+			local success, returned = RunCommand(text)
+	
+			if success then
+				CommandLine(returned)
 			else
-				return
-			end
-		end
-		
-		return {
-			Data = file,
-			Parent = parent,
-			Name = fileIndex,
-			Type = if typeof(file) == "table" then "Folder" else fileIndex:split(".")[2]
-		}
-	end
-	
-	function FileHandler.SetPathData(path, data)
-		local split = string.split(path, "/")
-	
-		local parentName = split[#split - 1]
-		local fileName = split[#split]
-	
-		table.remove(split, #split)
-		local parentPath = table.concat(split, "/")
-	
-		local parentInfo = FileHandler.GetPathInfo(parentPath)
-	
-		if not parentInfo then
-			print(`Path {parentPath} does not exist`)
-			return
-		end
-	
-		if typeof(parentInfo) ~= "table" then -- Not a folder
-			print(`Folder {parentPath} does not exist`)
-			return
-		end
-	
-		local function validateData(data)
-			if typeof(data) ~= "table" then
-				local fileType = string.split(fileName, ".")[2]
-	
-				if not table.find(FileHandler.FileTypes, fileType) then
-					error(`Invalid File type: {fileName}`)
-				end
-	
-				return
+				CommandLine("Error running command")
+				CommandLine(returned)
+				CommandLine("", nil, true)
 			end
 	
-			for fileName, value in pairs(data) do
-				local fileType = string.split(fileName, ".")[2]
-	
-				if typeof(value) == "table" then
-					validateData(value)
-					continue
-				end
-	
-				if not table.find(FileHandler.FileTypes, fileType) then
-					error(`Invalid File: {fileName}`)
-				end
-			end
-		end
-	
-		if data ~= nil then
-			validateData(data)
-		end
-	
-		parentInfo.Data[fileName] = data
-		return true
-	end
-	
-	function FileHandler.ConnectToWindow(createdWindow)
-		window = createdWindow
-		
-		local su, er = pcall(function()
 			CommandLine("", nil, true)
-			keyboardConnection = FileHandler.Keyboard:Connect("TextInputted", KeyboardInput)
 		end)
-		
-		if not su then
-			print(er)
-		end
 	end
 	
+	CommandPrompt.Run = RunCommand
 	
 	Commands.Mkdir = {
 		Usages = {"makedirectory"},
@@ -1370,16 +1265,17 @@ WOS_MODULES.FileHandler = function()
 	
 	Commands.Mkfile = {
 		Usages = {"makefile"},
-		Tags = {"-n"},
 		Callback = function(args)
 			local path = args[1]
 			table.remove(args, 1)
 			local data = table.concat(args, " ")
+	
+			--local success = pcall(function()
+			--	FileHandler.SetPathData(path, data)
+			--end)
 			
-			local success = pcall(function()
-				FileHandler.SetPathData(path, data)
-			end)
-			
+			local success = pcall(FileHandler.SetPathData, path, data)
+	
 			if success then
 				return `New File --> {path}`
 			else
@@ -1392,16 +1288,16 @@ WOS_MODULES.FileHandler = function()
 		Usages = {"ldir", "listdirectory"},
 		Callback = function(_, path)
 			local info = FileHandler.GetPathInfo(path)
-			
+	
 			if not info or typeof(info) ~= "table" then
 				return `Directory '{path}' was not found`
 			end
-			
+	
 			info = info.Data
-			
+	
 			local split = path:split("/")
 			local parent = split[#split]
-			
+	
 			for name, v in pairs(info) do
 				local fileType = if typeof(v) == "table" then "Directory" else "File"
 				local text = `{parent} --> {name} --> {fileType}`
@@ -1413,7 +1309,7 @@ WOS_MODULES.FileHandler = function()
 	Commands.Data = {
 		Callback = function(_, path)
 			local info = FileHandler.GetPathInfo(path)
-			
+	
 			if not info then
 				return `{path} does not exist`
 			end
@@ -1429,7 +1325,7 @@ WOS_MODULES.FileHandler = function()
 	Commands.Cmds = {
 		Usages = {"help"},
 		Callback = function()
-			
+	
 			for name, command in pairs(Commands) do
 				CommandLine(name, 1)
 			end
@@ -1441,308 +1337,128 @@ WOS_MODULES.FileHandler = function()
 		Callback = ClearCommandLine
 	}
 	
-	for mainName, command in pairs(Commands) do
-		CommandNames[mainName:lower()] = command
-	
-		if command.Usages then
-			for _, usage in pairs(command.Usages) do
-				CommandNames[usage:lower()] = command
-			end
-		end
-	end
-	
-	return FileHandler
-end
-
-WOS_MODULES.GridLayout = function()
-	export type GridLayoutInfo = {
-		Padding: UDim2,
-		CellSize: UDim2,
-		StartPosition: UDim2,
-		FillDirection: Enum.FillDirection
+	Commands.Install = {
+		Callback = function(_, text)
+			
+		end,
 	}
 	
-	local function GridLayout(parent, config: GridLayoutInfo)
-		local self = {
+	return CommandPrompt
+end
+
+WOS_MODULES.ListLayoutV2 = function()
+	export type ListLayoutInfo = {
+		Padding: UDim?,
+		StartPosition: UDim?,
+		CenterObjects: boolean?,
+		FillDirection: Enum.FillDirection?,
+		HorizontalAlignment: Enum.HorizontalAlignment?
+	}
+	
+	local function ListLayout(parent, config: ListLayoutInfo): ListLayout
+		local layout = {
 			Parent = parent,
 			_Children = {},
 			_Config = config
 		}
-	
-		local function scaleUdim2(udim2: UDim2)
-			local absoluteSize = self.Parent.AbsoluteSize
-	
-			local scaleX = udim2.X.Scale + (udim2.X.Offset / absoluteSize.X)
-			local scaleY = udim2.Y.Scale + (udim2.Y.Offset / absoluteSize.Y)
-	
-			return UDim2.fromScale(scaleX, scaleY)
-		end
-	
-		if config.StartPosition then
-			config.StartPosition = scaleUdim2(config.StartPosition)
-		else
-			config.StartPosition = UDim2.fromScale(0, 0)
-		end
-	
-		config.CellSize = scaleUdim2(config.CellSize) -- Convert everything to scale. Easier to use to me because i suck
-		config.Padding = scaleUdim2(config.Padding)
-	
-		function self:AddChild(child: GuiObject)
-			child.Size = config.CellSize
-			self.Parent:AddChild(child)
-	
-			local lastChild: GuiObject = self._Children[#self._Children]
-			local position = config.StartPosition
-	
-			if lastChild then
-				position = UDim2.fromScale(position.X.Scale, lastChild.Position.Y.Scale)
-				local spaceLeft = lastChild.Position.X.Scale + config.CellSize.X.Scale + config.Padding.X.Scale + (config.CellSize.X.Scale / 2) -- Uhh this just works
-	
-				if spaceLeft < 1 then
-					position = UDim2.fromScale(lastChild.Position.X.Scale + config.CellSize.X.Scale + config.Padding.X.Scale, lastChild.Position.Y.Scale)
-				else
-					position += UDim2.fromScale(0, config.CellSize.Y.Scale + config.Padding.Y.Scale)
-				end
+		
+		config.FillDirection = config.FillDirection or Enum.FillDirection.Vertical
+		config.StartPosition = config.StartPosition or UDim.new(0, 0)
+		config.Padding = config.Padding or UDim.new(0, 0)
+		
+		function layout:AddChild(screenObject)
+			if not layout.Parent then
+				error("[ListLayout:AddChild]: ListLayout has no parent")
 			end
-	
-			child.Position = position
-			table.insert(self._Children, child)
-		end
-	
-		function self:Refresh()
-			config.CellSize = scaleUdim2(config.CellSize)
-			config.Padding = scaleUdim2(config.Padding)
 			
-			local clone = table.clone(self._Children)
-			self._Children = {}
-	
-			for _, v in ipairs(clone) do
-				self:AddChild(v)
-			end
-		end
-	
-		function self:Remove(childIndex, destroyChild: boolean)
-			local index = childIndex
-	
-			if typeof(childIndex) ~= "number" then
-				index = table.find(self._Children, childIndex)
-			end
-	
-			if not index then
-				print(("[Grid Layout]: Child was not found. Cannot remove."))
+			if table.find(layout._Children, screenObject) then
 				return
 			end
 	
-			local child = self._Children[index]
-			table.remove(self._Children, index)
+			local position
+			local lastChild = layout._Children[#layout._Children]
+	
+			if config.FillDirection == Enum.FillDirection.Vertical then
+				position = UDim2.new(0, 0, config.StartPosition.Scale, config.StartPosition.Offset)
+	
+				if lastChild then
+					local yScale = lastChild.Position.Y.Scale + lastChild.Size.Y.Scale
+					local yOffset = lastChild.Position.Y.Offset + lastChild.Size.Y.Offset
+	
+					position = UDim2.new(0, 0, yScale + config.Padding.Scale, yOffset + config.Padding.Offset)
+				end
+	
+				if config.CenterObjects then
+					screenObject.AnchorPoint = Vector2.new(0.5, screenObject.AnchorPoint.Y)
+					position += UDim2.fromScale(0.5, 0)
+				end
+	
+			elseif config.FillDirection == Enum.FillDirection.Horizontal then
+				position = UDim2.new(config.StartPosition.Scale, config.StartPosition.Offset, 0, 0)
+	
+				if lastChild then
+					local xScale = lastChild.Position.X.Scale + lastChild.Size.X.Scale
+					local xOffset = lastChild.Position.X.Offset + lastChild.Size.X.Offset
+	
+					position = UDim2.new(xScale + config.Padding.Scale, xOffset + config.Padding.Offset, 0, 0)
+				end
+				
+				if config.CenterObjects then
+					screenObject.AnchorPoint = Vector2.new(0.5, screenObject.AnchorPoint.X)
+					position += UDim2.fromScale(0, 0.5)
+				end
+			else
+				error("[LIST LAYOUT]: Invalid fill direction. FillDirection must be An Enum.FillDirection")
+			end
+	
+			screenObject.Position = position
+			layout.Parent:AddChild(screenObject)
+			table.insert(layout._Children, screenObject)
+		end
+	
+		function layout:Refresh()
+			local oldChildren = layout._Children
+			layout._Children = {}
+	
+			for _, v in ipairs(oldChildren) do
+				layout:AddChild(v)
+			end
+	
+			oldChildren = nil
+		end
+	
+		function layout:Remove(childIndex, destroyChild: boolean)
+			local index = childIndex
+	
+			if typeof(childIndex) ~= "number" then
+				index = table.find(layout._Children, childIndex)
+			end
+	
+			if not index then
+				--print(("[LIST LAYOUT]: Child was not found. Cannot remove."))
+				return
+			end
+	
+			local child = layout._Children[index]
+			table.remove(layout._Children, index)
 	
 			if destroyChild then
 				child:Destroy()
 			end
 	
-			self:Refresh()
+			layout:Refresh()
 		end
-		
-		function self:Destroy()
-			table.clear(self)
+	
+		function layout:Destroy()
+			table.clear(layout)
 		end
-		
-		return self
+	
+		return layout
 	end
 	
-	export type GridLayout = typeof(GridLayout())
+	export type ListLayout = typeof(ListLayout())
 	
-	return GridLayout
-end
-
-WOS_MODULES.ModemRequests = function()
-	local ModemRequests = {DefaultModem = nil}
-	
-	function ModemRequests.PostRequest(url: string, data, timeoutSeconds, extraHeaders, modem)
-		modem = modem or ModemRequests.DefaultModem or error("[ModemRequests.RequestAsync]: No modem provided")
-		
-		local recievedData
-		local timeWaited = 0
-		timeoutSeconds = timeoutSeconds or 20
-	
-		local function callback(success, response)
-			if not success then
-				return
-			end
-	
-			-- Attempt to decode the response
-			local procced, result = pcall(function()
-				recievedData = JSONDecode(response)
-			end)
-	
-			if not procced then
-				print("FAILURE TO DECODE, GOT " + tostring(response))
-				recievedData = response or false
-			end
-		end
-	
-		local headers = {["Content-Type"] = "application/json"}
-	
-		if extraHeaders then
-			for index, value in pairs(extraHeaders) do
-				headers[index] = value
-			end
-		end
-	
-		modem:RealPostRequest(url, JSONEncode(data), true, callback, headers)
-	
-		repeat
-			timeWaited += task.wait()
-		until recievedData ~= nil or timeWaited > timeoutSeconds
-	
-		if recievedData  == nil then
-			print("The URL did not respond.")
-			print(url)
-		end
-	
-		return recievedData
-	end
-	
-	export type RequestInfo = {
-		Url: string,
-		Data: {}?,
-		Headers: { [string]: string }?
-	}
-	
-	export type RequestResponse = {
-		status_code: number,
-		text: string,
-		headers: { [string]: string },
-		ok: boolean
-	}
-	
-	function ModemRequests.GetRequest(info: RequestInfo, timeoutSeconds: number?, modem): RequestResponse
-		modem = modem or info.Modem or ModemRequests.DefaultModem or error("[ModemRequests.GetRequest]: No modem provided")
-		
-		local responseData = nil
-	
-		local timeWaited = 0
-		local timeoutSeconds = info.TimeoutSeconds or 20
-	
-		local function callback(success, response)
-			if not success then
-				print("Modem failure, GOT: "..tostring(response))
-			end
-			
-			responseData = response
-		end
-	
-		local headers = {
-			["Content-Type"] = "application/json",
-		}
-	
-		if info.Headers then
-			for index, value in pairs(info.Headers) do
-				headers[index] = value
-			end
-		end
-		
-		local content = {
-			["url"] = info.Url,
-			["json_content"] = info.Data,
-			["headers"] = headers
-		}
-		
-		modem:RealPostRequest("https://sweetboss151.pythonanywhere.com/api/http-request", JSONEncode(content), true, callback, { ["Content-Type"] = "application/json", })
-	
-		repeat
-			timeWaited += task.wait()
-		until responseData ~= nil or timeWaited > timeoutSeconds
-	
-		if responseData == nil then
-			print("[GetRequest]: web api did not respond")
-			error("[GetRequest]: web api did not respond")
-		end
-	
-		return responseData
-	end
-	
-	return ModemRequests
-end
-
-WOS_MODULES.InputButton = function()
-	local ActiveInputs = {}
-	
-	local function GetKeyboardInput(Keyboard, timeoutSeconds)
-		timeoutSeconds = timeoutSeconds or error("[GetKeyboardInput]: No time provided")
-		local timeWaited = 0
-	
-		local text, playerName
-	
-		local connection = Keyboard:Connect("TextInputted", function(inputText, inputPlayerName)
-			print("EVENT FIRED")
-			text = string.gsub(inputText, "\n+$", "")
-			playerName = inputPlayerName
-		end)
-	
-		while timeWaited < timeoutSeconds and not (text and playerName) do
-			timeWaited += task.wait()
-		end
-	
-		if not text then
-			print("Ran out of time!")
-		end
-	
-		connection:Unbind()
-		return text, playerName
-	end
-	
-	return function(config: { Time: number?, Button: TextButton, Keyboard: any, InputText: string?, DefaultText: string?, Cooldown: number?}, successInput: (string, string) -> (), failInput: () -> () | string)
-		local button = config.Button
-		local defaultText = config.DefaultText or button.Text
-	
-		config.Keyboard = config.Keyboard or error("[InputButton]: No keyboard")
-		
-		local onCooldown = false
-		
-		button.MouseButton1Click:Connect(function()
-			if ActiveInputs[config.Keyboard.GUID] or onCooldown then
-				return
-			end
-			
-			ActiveInputs[config.Keyboard.GUID] = true
-			onCooldown = true
-			
-			button.Text = config.InputText or "Input Keyboard"
-	
-			local text, playerName = GetKeyboardInput(config.Keyboard, config.Time or 6) -- yields
-			
-			if defaultText then
-				button.Text = defaultText
-			end
-	
-			if text then
-				local success, errormsg = pcall(successInput, text, playerName)
-	
-				if not success then
-					print(`[InputButton]: error in success callback:\n{errormsg}`)
-				end
-			else
-				if typeof(failInput) == "function" then
-					local success, errormsg = pcall(failInput)
-	
-					if not success then
-						print(`[InputButton]: error in failure callback:\n{errormsg}`)
-					end
-				elseif typeof(failInput) == "string" then
-					button.Text = failInput or defaultText
-				end
-			end
-			
-			ActiveInputs[config.Keyboard.GUID] = false
-			
-			if config.Cooldown then
-				task.wait(config.Cooldown)
-			end
-			
-			onCooldown = false
-		end)
-	end
+	return ListLayout
 end
 
 WOS_MODULES.WindowHandler = function()
@@ -1760,8 +1476,8 @@ WOS_MODULES.WindowHandler = function()
 			}
 	
 			local info = containerTypes[windowType] or containerTypes.Custom
-	
-			local windowTemplate = WindowHandler.Screen:CreateElement("TextButton", { Text = "", TextScaled = true, TextWrapped = true, AutoButtonColor = false, Active = false, AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = Color3.fromHex("#505050"), BorderColor3 = Color3.fromHex("#323232"), BorderSizePixel = 2, Position = UDim2.fromScale(0.5, 0.5), Selectable = false, Size = UDim2.fromScale(0.6, 0.6) })
+			info.Active = false 
+			local windowTemplate = WindowHandler.Screen:CreateElement("TextButton", { Draggable = true, Text = "", TextScaled = true, TextWrapped = true, AutoButtonColor = false, Active = true, AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = Color3.fromHex("#505050"), BorderColor3 = Color3.fromHex("#323232"), BorderSizePixel = 2, Position = UDim2.fromScale(0.5, 0.5), Selectable = false, Size = UDim2.fromScale(0.6, 0.6) })
 			local contentFrame = WindowHandler.Screen:CreateElement(info[1], info[2]) -- Content container
 	
 			local title = WindowHandler.Screen:CreateElement("TextLabel", { RichText = true, TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, BackgroundTransparency = 1, Size = UDim2.fromScale(0.53, 0.1) })
@@ -1790,20 +1506,20 @@ WOS_MODULES.WindowHandler = function()
 	-- Tables
 	export type WindowConfig = {
 		Type: "Text" | "Scroll" | "Custom",
-		Text: string,
+		Text: string?,
 		Name: string,
 		Color: Color3,
 		WindowSize: UDim2,
 		TextColor: Color3,
 		Layout: any, -- ListLayout/GridLayout
 		Parent: GuiObject,
-		StartPosition: UDim2,
-		
+		StartPosition: UDim2?,
+	
 		BackgroundImage: any,
-		BackgroundImageColor: Color3,
-		BackgroundBrightenColor: Color3, -- For images than can't be recolored, or get dark when they are
-		
-		OverwriteIfExists: boolean
+		BackgroundImageColor: Color3?,
+		BackgroundBrightenColor: Color3?, -- For images than can't be recolored, or get dark when they are???
+	
+		OverwriteIfExists: boolean -- Deletes and remakes window if it already exists
 	}
 	
 	local Windows: { [string]: Window } = {}
@@ -2008,12 +1724,315 @@ WOS_MODULES.WindowHandler = function()
 	return WindowHandler
 end
 
+WOS_MODULES.ModemRequests = function()
+	local ModemRequests = {DefaultModem = nil}
+	
+	function ModemRequests.PostRequest(url: string, data, timeoutSeconds, extraHeaders, modem)
+		modem = modem or ModemRequests.DefaultModem or error("[ModemRequests.RequestAsync]: No modem provided")
+		
+		local recievedData
+		local timeWaited = 0
+		timeoutSeconds = timeoutSeconds or 20
+	
+		local function callback(success, response)
+			if not success then
+				return
+			end
+	
+			-- Attempt to decode the response
+			local procced, result = pcall(function()
+				recievedData = JSONDecode(response)
+			end)
+	
+			if not procced then
+				print("FAILURE TO DECODE, GOT " + tostring(response))
+				recievedData = response or false
+			end
+		end
+	
+		local headers = {["Content-Type"] = "application/json"}
+	
+		if extraHeaders then
+			for index, value in pairs(extraHeaders) do
+				headers[index] = value
+			end
+		end
+	
+		modem:RealPostRequest(url, JSONEncode(data), true, callback, headers)
+	
+		repeat
+			timeWaited += task.wait()
+		until recievedData ~= nil or timeWaited > timeoutSeconds
+	
+		if recievedData  == nil then
+			print("The URL did not respond.")
+			print(url)
+		end
+	
+		return recievedData
+	end
+	
+	export type RequestInfo = {
+		Url: string,
+		Data: {}?,
+		Headers: { [string]: string }?
+	}
+	
+	export type RequestResponse = {
+		status_code: number,
+		text: string,
+		headers: { [string]: string },
+		ok: boolean
+	}
+	
+	function ModemRequests.GetRequest(info: RequestInfo, timeoutSeconds: number?, modem): RequestResponse
+		modem = modem or info.Modem or ModemRequests.DefaultModem or error("[ModemRequests.GetRequest]: No modem provided")
+		
+		local responseData = nil
+	
+		local timeWaited = 0
+		local timeoutSeconds = info.TimeoutSeconds or 20
+	
+		local function callback(success, response)
+			if not success then
+				print("Modem failure, GOT: "..tostring(response))
+			end
+			
+			responseData = response
+		end
+	
+		local headers = {
+			["Content-Type"] = "application/json",
+		}
+	
+		if info.Headers then
+			for index, value in pairs(info.Headers) do
+				headers[index] = value
+			end
+		end
+		
+		local content = {
+			["url"] = info.Url,
+			["json_content"] = info.Data,
+			["headers"] = headers
+		}
+		
+		modem:RealPostRequest("https://wos-flask-app.vercel.app/api/http-request", JSONEncode(content), true, callback, { ["Content-Type"] = "application/json", })
+	
+		repeat
+			timeWaited += task.wait()
+		until responseData ~= nil or timeWaited > timeoutSeconds
+	
+		if responseData == nil then
+			print("[GetRequest]: web api did not respond")
+			error("[GetRequest]: web api did not respond")
+		end
+	
+		return responseData
+	end
+	
+	return ModemRequests
+end
+
+WOS_MODULES.InputButton = function()
+	local ActiveInputs = {}
+	
+	local function GetKeyboardInput(Keyboard, timeoutSeconds)
+		timeoutSeconds = timeoutSeconds or error("[GetKeyboardInput]: No time provided")
+		local timeWaited = 0
+	
+		local text, playerName
+	
+		local connection = Keyboard:Connect("TextInputted", function(inputText, inputPlayerName)
+			print("EVENT FIRED")
+			text = string.gsub(inputText, "\n+$", "")
+			playerName = inputPlayerName
+		end)
+	
+		while timeWaited < timeoutSeconds and not (text and playerName) do
+			timeWaited += task.wait()
+		end
+	
+		if not text then
+			print("Ran out of time!")
+		end
+	
+		connection:Unbind()
+		return text, playerName
+	end
+	
+	return function(config: { Time: number?, Button: TextButton, Keyboard: any, InputText: string?, DefaultText: string?, Cooldown: number?}, successInput: (string, string) -> (), failInput: () -> () | string)
+		local button = config.Button
+		local defaultText = config.DefaultText or button.Text
+	
+		config.Keyboard = config.Keyboard or error("[InputButton]: No keyboard")
+		
+		local onCooldown = false
+		
+		button.MouseButton1Click:Connect(function()
+			if ActiveInputs[config.Keyboard.GUID] or onCooldown then
+				return
+			end
+			
+			ActiveInputs[config.Keyboard.GUID] = true
+			onCooldown = true
+			
+			button.Text = config.InputText or "Input Keyboard"
+	
+			local text, playerName = GetKeyboardInput(config.Keyboard, config.Time or 6) -- yields
+			
+			if defaultText then
+				button.Text = defaultText
+			end
+	
+			if text then
+				local success, errormsg = pcall(successInput, text, playerName)
+	
+				if not success then
+					print(`[InputButton]: error in success callback:\n{errormsg}`)
+				end
+			else
+				if typeof(failInput) == "function" then
+					local success, errormsg = pcall(failInput)
+	
+					if not success then
+						print(`[InputButton]: error in failure callback:\n{errormsg}`)
+					end
+				elseif typeof(failInput) == "string" then
+					button.Text = failInput or defaultText
+				end
+			end
+			
+			ActiveInputs[config.Keyboard.GUID] = false
+			
+			if config.Cooldown then
+				task.wait(config.Cooldown)
+			end
+			
+			onCooldown = false
+		end)
+	end
+end
+
+WOS_MODULES.FileHandler = function()
+	-- Modules
+	
+	-- Tables
+	local Commands = {}
+	local CommandNames = {}
+	local FileHandler = { StartDirectory = "OS", Directory = nil}
+	
+	local CommandLineLabels = {}
+	
+	FileHandler.FileTypes = {
+		"txt",
+		"img",
+		"exe",
+		"aud",
+	}
+	
+	-- Functions
+	function FileHandler.GetPathInfo(path) -- Must be absolute path :sob:
+		path = path:gsub("\\", "/") -- So backslashes work
+		path = path:gsub("^/+", "")
+		path = path:gsub("^"..FileHandler.StartDirectory, "")
+		--path = path:gsub(" ", "")
+		
+		local hirearchy = string.split(path, "/")
+		
+		local parent
+		local file = FileHandler.Directory[FileHandler.StartDirectory]
+		local fileIndex: string
+		
+		if path:match("^%s*$") or #path == 0 then
+			return {
+				Data = file,
+				Parent = file
+			}
+		end
+		
+		for _, fileName in ipairs(hirearchy) do
+			if file[fileName] then
+				parent = file
+				file = file[fileName]
+				fileIndex = fileName
+			else
+				return
+			end
+		end
+		
+		return {
+			Data = file,
+			Parent = parent,
+			Name = fileIndex,
+			Type = if typeof(file) == "table" then "Folder" else fileIndex:split(".")[2]
+		}
+	end
+	
+	function FileHandler.SetPathData(path: string, data: string)
+		local split = string.split(path, "/")
+	
+		local parentName = split[#split - 1]
+		local fileName = split[#split]
+	
+		table.remove(split, #split)
+		local parentPath = table.concat(split, "/")
+	
+		local parentInfo = FileHandler.GetPathInfo(parentPath)
+	
+		if not parentInfo then
+			print(`Path {parentPath} does not exist`)
+			return
+		end
+	
+		if typeof(parentInfo) ~= "table" then -- Not a folder
+			print(`Folder {parentPath} does not exist`)
+			return
+		end
+	
+		local function validateData(data)
+			if typeof(data) ~= "table" then
+				local fileType = string.split(fileName, ".")[2]
+	
+				if not table.find(FileHandler.FileTypes, fileType) then
+					error(`Invalid File type: {fileName}`)
+				end
+	
+				return
+			end
+	
+			for fileName, value in pairs(data) do
+				local fileType = string.split(fileName, ".")[2]
+	
+				if typeof(value) == "table" then
+					validateData(value)
+					continue
+				end
+	
+				if not table.find(FileHandler.FileTypes, fileType) then
+					error(`Invalid File: {fileName}`)
+				end
+			end
+		end
+	
+		if data ~= nil then
+			validateData(data)
+		end
+	
+		parentInfo.Data[fileName] = data
+		return true
+	end
+	
+	return FileHandler
+end
+
 --
 
 -- Modules WHY ARE THERE SO MANY
 local WindowHandler = require("WindowHandler")
 local SpeakerHandler = require("SpeakerHandler")
 local FileHandler = require("FileHandler")
+local CommandPrompt = require("CommandPrompt")
 local ModemRequests = require("ModemRequests")
 
 local ListLayout = require("ListLayoutV2")
@@ -2025,6 +2044,10 @@ local TableUtil = require("TableUtility")
 local ScreenPlus = require("ScreenPlus")
 local InputButton = require("InputButton")
 local PilotLua = require("PilotLua")
+
+local GetPartFromPort, GetPartsFromPort, TriggerPort, GetPort, JSONEncode, JSONDecode, Beep =
+	PilotLua.GetPartFromPort, PilotLua.GetPartsFromPort, PilotLua.TriggerPort, PilotLua.GetPort,
+	PilotLua.JSONEncode, PilotLua.JSONDecode, PilotLua.Beep
 
 -- Objects
 local Screen: ScreenPlus.Screen = ScreenPlus(GetPartFromPort(1, "TouchScreen"))
@@ -2452,7 +2475,6 @@ local function OpenFile(path)
 				else
 					RunStringCode(micro, data)
 				end
-				
 			else
 				CreateProcess(fileName, data, {})
 			end
@@ -2559,9 +2581,7 @@ WindowHandler.DefaultConfig = {
 FileHandler.StartDirectory = "OS"
 FileHandler.Directory = OSDirectory
 
-FileHandler.Screen = Screen
-FileHandler.Disk = Disk
-FileHandler.Keyboard = Keyboard
+CommandPrompt.Screen = Screen
 
 background.Image = OSConfig.Wallpaper
 
@@ -2621,8 +2641,7 @@ CreateTaskbarButton("Command Prompt", {
 	},
 
 	Callback = function(window)
-		window.Layout = ListLayout(nil, {})
-		FileHandler.ConnectToWindow(window)
+		CommandPrompt.Init(window, Keyboard)
 	end,
 })
 
@@ -3135,8 +3154,20 @@ CreateTaskbarButton("Code", {
 				name..= math.random(i, 5)
 			end
 			
-			local success = CreateProcess(name, text)
+			local success: boolean
 			
+			if IsLink(text) then
+				local micro = GetUnusedMicro()
+				
+				if micro then
+					RunStringCode(micro, text)
+				else
+					success = false
+				end
+			else
+				success = CreateProcess(name, text)
+			end
+						
 			if success then
 				window._Elements.contentFrame.Text = "Code Executing..."
 			else
@@ -3188,6 +3219,151 @@ CreateTaskbarButton("Music", {
 	end,
 })
 
+CreateTaskbarButton("Web Browser", {
+	Type = "Grid",
+	WindowConfig = {
+		Name = "Web Browser",
+		Type = "Custom"
+	},
+	
+	Callback = function(mainWindow)
+		local recentDomainFrame = Screen:CreateElement("ScrollingFrame", { AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.fromScale(0, 1.1), ScrollBarImageColor3 = Color3.fromHex("#000000"), ScrollBarImageTransparency = 1, Active = true, BackgroundColor3 = Color3.fromHex("#FFFFFF"), BackgroundTransparency = 0.9, BorderSizePixel = 0, Position = UDim2.fromScale(0, 0.3), Size = UDim2.fromScale(0.45, 0.5) })
+		local recentDomainLabel = Screen:CreateElement("TextLabel", { Text = "Recents", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, Active = true, BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(0, 0.15), Size = UDim2.fromScale(0.45, 0.1), Font = Enum.Font.SourceSans })
+		local currentDomainLabel = Screen:CreateElement("TextLabel", { Text = "Current-Domain", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Size = UDim2.fromScale(1, 0.1), Font = Enum.Font.SourceSans })
+		local domainInputButton = Screen:CreateElement("TextButton", { Text = "Input Domain", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, AnchorPoint = Vector2.new(1, 0), BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(1, 0.3), Selectable = false, Size = UDim2.fromScale(0.45, 0.5), Font = Enum.Font.SourceSans })
+		local visitDomainLabel = Screen:CreateElement("TextLabel", { Text = "Visit Domain", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, Active = true, AnchorPoint = Vector2.new(1, 0), BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(1, 0.15), Size = UDim2.fromScale(0.45, 0.1), Font = Enum.Font.SourceSans })
+		local createButton = Screen:CreateElement("TextButton", { Text = "Create Website", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, AnchorPoint = Vector2.new(0, 1), BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(0, 1), Selectable = false, Size = UDim2.fromScale(1, 0.122), Font = Enum.Font.SourceSans })
+
+		local recentDomainLayout = ListLayout(recentDomainFrame, {
+			Padding = UDim.new(0.05, 0),
+			StartPosition = UDim.new(0.05, 0),
+			CenterObjects = true
+		})
+		
+		mainWindow:AddChild(recentDomainFrame)
+		mainWindow:AddChild(recentDomainLabel)
+		mainWindow:AddChild(currentDomainLabel)
+		mainWindow:AddChild(domainInputButton)
+		mainWindow:AddChild(visitDomainLabel)
+		mainWindow:AddChild(createButton)
+		
+
+		local function loadWebsite(domain: string)
+			local success, errormsg = pcall(function()
+				print("help me")
+				local content: WebContent = Modem:GetRequest(domain)
+				print("CONTENT")
+				print(content)
+				
+				--if isLink(content.code) then
+				--	local micro = GetUnusedMicro()
+					
+				--	if not micro then
+				--		error("No available microcontrollers")
+				--	end
+					
+				--	RunStringCode(micro, content)
+				--else
+				--	CreateProcess(domain, content.code)
+				--end
+			end)
+			
+			if not success then
+				WindowError(errormsg)
+			end
+		end
+		
+		InputButton({ Button = domainInputButton, InputText = "Enter...", Keyboard = Keyboard }, function(text)
+			domainInputButton.Text = "Attempting to read data..."
+			loadWebsite(text)
+		end, "")
+		
+		createButton.MouseButton1Click:Connect(function()
+			local window = WindowHandler.Create({
+				Name = "Create Website",
+				Type = "Custom"
+			})
+
+			if mainWindow.Max then
+				window:Maximize()
+			end
+			
+			local domainInputButton = Screen:CreateElement("TextButton", { Text = "Domain Name", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(0, 0.3), Selectable = false, Size = UDim2.fromScale(1, 0.1), Font = Enum.Font.SourceSans })
+			local contentInputButton = Screen:CreateElement("TextButton", { Text = "Code Link / JSON", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(0, 0.4), Selectable = false, Size = UDim2.fromScale(1, 0.2), Font = Enum.Font.SourceSans })
+			local createWebsiteButton = Screen:CreateElement("TextButton", { Text = "Create ", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, AnchorPoint = Vector2.new(0, 1), BackgroundColor3 = Color3.fromHex("#323232"), BorderSizePixel = 0, Position = UDim2.fromScale(0, 1), Selectable = false, Size = UDim2.fromScale(1, 0.122), Font = Enum.Font.SourceSans })
+			local resultLabel = Screen:CreateElement("TextLabel", { Text = "Created / Failed to create website", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, Active = true, AnchorPoint = Vector2.new(0.5, 0), BackgroundTransparency = 1, Position = UDim2.fromScale(0.5, -1), Selectable = true, Size = UDim2.fromScale(0.5, 1), Font = Enum.Font.SourceSans })
+			local noticeLabel = Screen:CreateElement("TextLabel", { Text = "Input code link or JSON*", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, BackgroundColor3 = Color3.fromHex("#FFFFFF"), BackgroundTransparency = 0.9, BorderSizePixel = 0, Size = UDim2.fromScale(1, 0.1), Font = Enum.Font.SourceSans })
+			local noticeTestLabel = Screen:CreateElement("TextLabel", { Text = "This CANNOT be used in test place", TextColor3 = Color3.fromHex("#FFFFFF"), TextScaled = true, TextWrapped = true, BackgroundColor3 = Color3.fromHex("#FFFFFF"), BackgroundTransparency = 0.9, BorderSizePixel = 0, Position = UDim2.fromScale(0, 0.15), Size = UDim2.fromScale(1, 0.1), Font = Enum.Font.SourceSans })
+
+			window:AddChild(contentInputButton)
+			window:AddChild(createWebsiteButton)
+			createWebsiteButton:AddChild(resultLabel)
+			window:AddChild(noticeLabel)
+			window:AddChild(noticeTestLabel)
+			window:AddChild(domainInputButton)
+			
+			local domainName: string?
+			local domainContent: string?
+
+			InputButton({ Button = domainInputButton, Keyboard = Keyboard, InputText = "Enter Domain" }, function(text)
+				domainName = text
+				domainInputButton.Text = domainName
+			end, "")
+			
+			InputButton({ Button = contentInputButton, Keyboard = Keyboard, InputText = "Enter Content" }, function(text)
+				local data: {} | string
+				
+				if IsLink(text) then
+					data = {
+						code = text
+					}
+					data = JSONEncode(data)
+				else
+					data = text
+				end
+				
+				domainContent = data.."\n" -- Fix stupid thing that breaks GetRequest without a newline
+			end, "")
+			
+			createWebsiteButton.MouseButton1Click:Connect(function()
+				resultLabel.TextColor3 = Color3.fromRGB(200, 0, 0)
+				resultLabel.Text = ""
+				
+				if not domainName then
+					resultLabel.Text = "No domain name"
+					return
+				end
+				
+				if not domainContent then
+					resultLabel.Text = "No domain content"
+					return
+				end
+				
+				local success, errormsg = pcall(function()
+					Modem:PostRequest(domainName, domainContent)
+					Modem:GetRequest(domainName)
+				end)
+				
+				
+			end)
+		end)
+
+		for index, domain in ipairs(OSConfig.RecentDomains) do
+			local container = Components.WebBrowser_RecentDomainContainer(domain)
+			container.domainName.Text = domain
+			
+			container.domainName.MouseButton1Click:Connect(function()
+				loadWebsite(domain)
+			end)
+			
+			container.deleteDomain.MouseButton1Click:Connect(function()
+				table.remove(OSConfig.RecentDomains, index)
+				recentDomainLayout:Remove(container.recentDomainContainer, true)
+			end)
+		end
+	end,
+})
+
 LoadPinnedFiles()
 --SpeakerHandler.LoopSound(1846897737, 111)
 
@@ -3211,10 +3387,16 @@ local OSLibrary = {
 	},
 	
 	Input = GetKeyboardInput,
-	WindowInput = WindowInput
+	WindowInput = WindowInput,
 }
 
-Disk:Write("OSLibrary", setmetatable({}, { __index = OSLibrary })) -- Stupid thing to stop "table cannot be cyclic"
+Disk:Write("OSLibrary", setmetatable({}, {
+	__index = OSLibrary,
+	__newindex = function()
+		print("Attempt to modify OSLibrary")
+		error("Attempt to modify OSLibrary")
+	end,
+})) -- Stupid thing to stop "table cannot be cyclic"
 
 while true do
 	local dt = task.wait()
